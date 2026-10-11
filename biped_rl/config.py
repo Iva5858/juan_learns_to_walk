@@ -122,12 +122,15 @@ class RewardWeights:
     # --- penalties (positive numbers; summed, then reward *= exp(-sum)) ---
     path_offset: float = 2.0         # distance^2 from the straight start line [m^2] (0.02 at 10 cm)
     stand_still: float = 1.0         # moving < 50% of a walking command (0 at half speed, 1 when stopped)
-    symmetry: float = 10.0           # left leg now vs right leg half a stride ago (mirrored) [rad^2]
-    step_timing: float = 1.5         # every step: latest |left->right - right->left interval| / their sum
-                                     # (an even da-da-da-da rhythm costs 0; a lopsided skip is charged
-                                     # continuously; charged only at touchdowns it was too weak to matter)
-    posture_symmetry: float = 15.0   # left vs right leg AVERAGE angle over the last stride (mirrored)
-                                     # [rad^2]: a leg held straighter/bent all the time is a limp too
+    symmetry: float = 3.0            # left leg now vs right leg half a stride ago (mirrored) [rad^2]
+                                     # (juan_v3's value; the mirror-symmetric policy, EnvConfig.
+                                     # mirror_symmetry, does the heavy lifting now)
+    step_timing: float = 0.0         # every step: latest |left->right - right->left interval| / their sum.
+                                     # Off: replaced by the mirror-symmetric policy (v5/v6 used 3 / 1.5
+                                     # and stayed uneven)
+    posture_symmetry: float = 0.0    # left vs right leg AVERAGE angle over the last stride (mirrored)
+                                     # [rad^2]. Off: replaced by the mirror-symmetric policy (v4 used 15
+                                     # and skipped)
     # --- wear per cycle (penalties count events, so many small gentle motions are not free) ---
     gait_mismatch: float = 1.0       # fraction of feet on/off the ground against the gait clock
     footstep: float = 1.0            # per touchdown: fewer, rhythm-paced steps = fewer impact cycles
@@ -203,6 +206,9 @@ class EnvConfig:
     action_filter: float = 0.5   # EMA on actions (1 = off). Use the same filter on the robot!
     history: int = 3             # past sensor frames stacked into the observation
     episode_seconds: float = 20.0
+    # Left-right symmetric policy by construction (policy.py, symmetry.py). Configs saved without
+    # this key (runs up to juan_v6) load with it off.
+    mirror_symmetry: bool = True
 
     def to_dict(self):
         return asdict(self)
@@ -215,6 +221,6 @@ class EnvConfig:
         def build(sub_cls, values):  # JSON turns tuples into lists
             return sub_cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in values.items()})
 
-        d = {**d, "command": {"mode": "forward", **d.get("command", {})}}  # pre-omni runs
+        d = {"mirror_symmetry": False, **d, "command": {"mode": "forward", **d.get("command", {})}}  # older runs
 
         return cls(**{k: build(nested[k], v) if k in nested else v for k, v in d.items()})

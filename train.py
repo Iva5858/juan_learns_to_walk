@@ -26,6 +26,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNorm
 from biped_rl.config import EnvConfig, RewardWeights, RobotConfig, portable_model_path
 from biped_rl.env import BipedEnv
 from biped_rl.policy import AsymmetricActorCritic
+from biped_rl.symmetry import SymmetricRunningMeanStd, check_robot_mirror, mirror_maps
 
 
 class TrainingDashboard(BaseCallback):
@@ -231,7 +232,17 @@ def main():
         print(f"resumed from {args.resume}, learning rate {model.learning_rate}", flush=True)
     else:
         env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0, gamma=0.99)
-        actor_obs_dim = BipedEnv(cfg.to_dict()).actor_obs_dim
+        probe = BipedEnv(cfg.to_dict())
+        actor_obs_dim = probe.actor_obs_dim
+        mirror = None
+        if cfg.mirror_symmetry:
+            mismatch = check_robot_mirror(probe)
+            print(f"mirror check: left/right part positions agree to {1000 * mismatch:.1f} mm", flush=True)
+            if mismatch > 0.005:
+                raise SystemExit("RobotConfig.mirror_pairs does not mirror this robot (a joint sign is "
+                                 "wrong, or the robot is not symmetric): fix it or set mirror_symmetry=False")
+            mirror = mirror_maps(probe)
+            env.obs_rms = SymmetricRunningMeanStd(mirror[0], mirror[1], shape=env.observation_space.shape)
         model = PPO(
             AsymmetricActorCritic,
             env,
@@ -247,6 +258,7 @@ def main():
             target_kl=0.02,
             policy_kwargs={
                 "actor_obs_dim": actor_obs_dim,
+                "mirror": mirror,
                 "net_arch": {"pi": [256, 128, 64], "vf": [512, 256, 128]},
                 "log_std_init": -1.0,
                 "activation_fn": torch.nn.ELU,
