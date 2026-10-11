@@ -3,7 +3,7 @@
     python train.py --run-name walk_v1                          # placeholder robot
     python train.py --run-name walk_v1 --model models/my_robot.xml --feet left_foot right_foot
     python train.py --run-name run_v1 --resume runs/walk_v1 --swing-ratio 0.6   # walk -> run curriculum
-    tensorboard --logdir runs                                   # rewards per term under rew/
+    tensorboard --logdir runs                                   # charts: see TrainingDashboard
 
 All other knobs (reward weights, servo model, randomization) are in biped_rl/config.py.
 The config used for a run is saved to runs/<name>/config.json.
@@ -28,28 +28,85 @@ from biped_rl.env import BipedEnv
 from biped_rl.policy import AsymmetricActorCritic
 
 
-class RewardTermLogger(BaseCallback):
-    """Logs the mean of every reward term and gait metric to TensorBoard."""
+class TrainingDashboard(BaseCallback):
+    """TensorBoard charts, grouped and ordered (TensorBoard sorts groups by name):
 
-    KEYS = ("speed_error", "tracking", "penalty_scale", "speed_max", "base_height",
-            "peak_torque_stall", "max_joint_speed_ratio", "broke", "fell", "recovering",
-            "heading_error_deg", "lateral_offset", "forward_velocity", "flight", "double_support", "peak_force_bw", "saturation", "action_delta",
-            "standing", "lateral_velocity", "command_lateral", "yaw_rate", "command_yaw_rate")
+    1_overview    is it learning: falls, hardware-limit stops, episode length, speed error, top speed
+    2_commands    does it do what it's told: error per command axis, heading, path drift
+    3_hardware    is it gentle on the servos: torque, joint speed, landing impact, saturation
+    4_gait        what the walk looks like: double support, flight, action change, body height
+    5_rewards     task terms with a non-zero weight, and the share of reward kept after penalties
+    6_penalties   penalties summed into a few groups (log_details=True: also every single term)
+    """
+
+    PENALTY_GROUPS = {
+        "path": ("path_offset", "stand_still"),
+        "posture": ("orientation", "ang_vel_xy", "lin_vel_z", "base_height", "knee_hyperextension",
+                    "hip_roll", "hip_roll_inward"),
+        "smoothness": ("action_rate", "action_acc", "joint_acc", "reversals"),
+        "servo_protection": ("servo_load", "servo_saturation", "servo_overload", "backdrive", "energy",
+                             "joint_limits"),
+        "feet_and_impacts": ("impact", "foot_slip", "feet_distance", "footstep"),
+        "gait_shape": ("symmetry", "posture_symmetry", "step_timing", "gait_mismatch"),
+    }
+
+    def __init__(self, cfg, log_details=False):
+        super().__init__()
+        self.dt = 1.0 / cfg.control_hz
+        self.weights = cfg.rewards
+        self.log_details = log_details
+        self.group_of = {term: g for g, terms in self.PENALTY_GROUPS.items() for term in terms}
 
     def _on_rollout_start(self):
-        self._sums, self._count = {}, 0
+        self._sums, self._count, self._ends = {}, 0, {"fell": 0, "broke": 0, "survived": 0}
+        self._ep_seconds = []
+
+    def _add(self, key, value):
+        self._sums[key] = self._sums.get(key, 0.0) + float(value)
 
     def _on_step(self):
-        for info in self.locals["infos"]:
-            for k, v in info.items():
-                if k.startswith(("rew/", "pen/")) or k in self.KEYS:
-                    self._sums[k] = self._sums.get(k, 0.0) + float(v)
+        for info, done in zip(self.locals["infos"], self.locals["dones"]):
             self._count += 1
+            self._add("2_commands/forward_error_mps", info["speed_error"])
+            self._add("2_commands/sideways_error_mps", abs(info["lateral_velocity"] - info["command_lateral"]))
+            self._add("2_commands/turn_rate_error_radps", abs(info["yaw_rate"] - info["command_yaw_rate"]))
+            self._add("2_commands/heading_error_deg", info["heading_error_deg"])
+            self._add("2_commands/path_drift_cm", 100 * info["lateral_offset"])
+            self._add("1_overview/speed_error_mps", info["speed_error"])
+            self._add("1_overview/top_speed_command_mps", info["speed_max"])
+            self._add("3_hardware/peak_torque_x_stall", info["peak_torque_stall"])
+            self._add("3_hardware/peak_joint_speed_x_servo_max", info["max_joint_speed_ratio"])
+            self._add("3_hardware/landing_force_x_body_weight", info["peak_force_bw"])
+            self._add("3_hardware/servo_saturation_pct", 100 * info["saturation"])
+            self._add("4_gait/double_support_pct", 100 * info["double_support"])
+            self._add("4_gait/flight_pct", 100 * info["flight"])
+            self._add("4_gait/action_change", info["action_delta"])
+            self._add("4_gait/body_height_m", info["base_height"])
+            self._add("5_rewards/kept_after_penalties", info["penalty_scale"])
+            for k, v in info.items():
+                if k.startswith("rew/") and getattr(self.weights, k[4:], 1.0) != 0:
+                    self._add(f"5_rewards/{k[4:]}", v)
+                elif k.startswith("pen/"):
+                    self._add(f"6_penalties/{self.group_of.get(k[4:], 'other')}", v)
+                    if self.log_details:
+                        self._add(f"7_penalty_details/{k[4:]}", v)
+            if done:  # VecEnv: info of the final step; truncated = ran out of time = survived
+                end = ("survived" if info.get("TimeLimit.truncated") else
+                       "broke" if info.get("broke", 0) > 0.5 else "fell")
+                self._ends[end] += 1
+                if "episode" in info:  # added by the Monitor wrapper
+                    self._ep_seconds.append(info["episode"]["l"] * self.dt)
         return True
 
     def _on_rollout_end(self):
         for k, v in self._sums.items():
-            self.logger.record(k if k.startswith(("rew/", "pen/")) else f"gait/{k}", v / max(self._count, 1))
+            self.logger.record(k, v / max(self._count, 1))
+        episodes = sum(self._ends.values())
+        if episodes:
+            self.logger.record("1_overview/falls_pct_of_episodes", 100 * self._ends["fell"] / episodes)
+            self.logger.record("1_overview/hardware_limit_stops_pct_of_episodes", 100 * self._ends["broke"] / episodes)
+        if self._ep_seconds:
+            self.logger.record("1_overview/episode_seconds", float(np.mean(self._ep_seconds)))
 
 
 def end_of_clip(frames, fps):
@@ -126,6 +183,8 @@ def main():
     p.add_argument("--new-rewards", action="store_true",
                    help="with --resume: use the reward weights and robot settings in the current code")
     p.add_argument("--video-every", type=int, default=1_000_000, help="steps between walking clips")
+    p.add_argument("--log-details", action="store_true",
+                   help="also chart every single penalty term (for reward tuning)")
     p.add_argument("--lr", type=float, help="learning rate (with --resume: overrides the saved one; "
                    "use smaller values for late fine-tuning, where the policy's noise is tiny)")
     p.add_argument("--reward", nargs="*", default=[], metavar="NAME=VALUE",
@@ -199,7 +258,7 @@ def main():
     eval_env = VecNormalize(eval_env, training=False, norm_reward=False)
 
     callbacks = [
-        RewardTermLogger(),
+        TrainingDashboard(cfg, log_details=args.log_details),
         VideoRecorder(cfg, run_dir / "videos", freq=args.video_every),
         CheckpointCallback(save_freq=max(2_000_000 // args.n_envs, 1),
                            save_path=str(run_dir / "checkpoints"), save_vecnormalize=True),

@@ -22,7 +22,7 @@ Onshape assembly ──onshape-to-robot──▶ MJCF ──inspect_model.py─�
 ```bash
 source .venv/bin/activate
 python train.py --run-name walk_v1                   # 30M steps, ~1.5-2 h on this Mac; Ctrl+C saves
-tensorboard --logdir runs                            # rew/* = each reward term, gait/* = gait metrics
+tensorboard --logdir runs                            # http://localhost:6006, charts in groups 1_ to 6_
 python evaluate.py --run runs/walk_v1                # nominal physics + runs/walk_v1/eval.mp4
 python evaluate.py --run runs/walk_v1 --robust -n 50 # randomized physics + pushes -> fall rate
 mjpython evaluate.py --run runs/walk_v1 --viewer     # live viewer (macOS needs mjpython)
@@ -30,7 +30,11 @@ mjpython evaluate.py --run runs/walk_v1 --viewer     # live viewer (macOS needs 
 
 `--best` evaluates the checkpoint with the best eval score instead of the last one.
 
-What to watch in TensorBoard: `rollout/ep_len_mean` rising to 1000 (no falls in 20 s), `gait/forward_velocity` tracking the command, then `rew/action_rate`, `rew/impact` and `rew/servo_saturation` shrinking toward 0.
+What to watch in TensorBoard (groups are numbered in reading order):
+- `1_overview`: `falls_pct_of_episodes` and `hardware_limit_stops_pct_of_episodes` falling toward 0, `episode_seconds` rising to 20, `speed_error_mps` falling, `top_speed_command_mps` climbing (speed curriculum).
+- `2_commands`: error per command axis (forward, sideways, turn rate), heading error and path drift, all shrinking.
+- `3_hardware`: torque, joint speed and landing force staying well under 1 (x stall, x servo max) and 2 (x body weight).
+- `4_gait`, `5_rewards`, `6_penalties` (grouped sums): for diagnosing *why*. `python train.py ... --log-details` adds every single penalty term under `7_penalty_details`.
 
 ## 2. The reward, and why each term is there
 
