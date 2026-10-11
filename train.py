@@ -23,7 +23,7 @@ from stable_baselines3.common.logger import Video
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
-from biped_rl.config import EnvConfig, RewardWeights, RobotConfig
+from biped_rl.config import EnvConfig, RewardWeights, RobotConfig, portable_model_path
 from biped_rl.env import BipedEnv
 from biped_rl.policy import AsymmetricActorCritic
 
@@ -141,7 +141,7 @@ def main():
         cfg.rewards = RewardWeights()
         cfg.robot = RobotConfig(model_path=cfg.robot.model_path, foot_bodies=cfg.robot.foot_bodies)
     if args.model:
-        cfg.robot.model_path = str(Path(args.model).resolve())
+        cfg.robot.model_path = portable_model_path(args.model)
     if args.feet:
         cfg.robot.foot_bodies = tuple(args.feet)
     if args.max_speed is not None:

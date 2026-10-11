@@ -20,7 +20,7 @@ import mujoco
 import numpy as np
 from gymnasium import spaces
 
-from biped_rl.config import EnvConfig
+from biped_rl.config import EnvConfig, resolve_model_path
 
 
 class BipedEnv(gym.Env):
@@ -30,7 +30,7 @@ class BipedEnv(gym.Env):
         if isinstance(config, dict):
             config = EnvConfig.from_dict(config)
         self.cfg = cfg = config or EnvConfig()
-        self.model = m = mujoco.MjModel.from_xml_path(cfg.robot.model_path)
+        self.model = m = mujoco.MjModel.from_xml_path(resolve_model_path(cfg.robot.model_path))
         self.data = mujoco.MjData(m)
         self.frame_skip = round(1.0 / (cfg.control_hz * m.opt.timestep))
         self.dt = self.frame_skip * m.opt.timestep
