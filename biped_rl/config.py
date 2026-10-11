@@ -163,6 +163,10 @@ class RewardWeights:
     # --- hardware limits: crossing one ends the episode like a fall (the robot "broke") ---
     break_impact: float = 3.0        # foot landing above this x body weight
     break_joint_speed: float = 1.3   # joint forced above this x servo no-load speed (gearbox back-driven)
+    break_requires_load: float = 0.5  # ...while the servo pushes back with more than this x stall torque.
+                                      # A limb coasting fast with the servo barely engaged is not what
+                                      # strips gears (juan_v3: 13 of 17 such stops walked on fine).
+                                      # 0 = any over-speed counts (runs up to juan_v6)
     # The speed curriculum only promotes after an episode that stayed inside all of these:
     safe_torque: float = 0.8         # x stall torque
     safe_joint_speed: float = 1.0    # x no-load speed
@@ -174,17 +178,36 @@ class RewardWeights:
 class RandomizationConfig:
     enabled: bool = True
     friction: tuple = (0.5, 1.2)            # rubber soles: ~0.6-1.0 indoors, lower bound for dusty/polished floors
-    mass_scale: tuple = (0.9, 1.15)         # per link (and inertia); BoM: 1.75 kg, up to ~2 kg with stronger prints
-    com_offset: float = 0.01                # torso CoM shift, m
+    # Mass: each part x mass_scale, then the whole robot x total_mass_scale, then the torso (battery,
+    # Pi, wiring: the hard case for balance is a heavy, high torso) x torso_mass_scale. Juan's model
+    # is 1.75 kg; this spans ~1.7-2.25 kg, centred near 2 kg (PLA prints and wiring come out heavy).
+    mass_scale: tuple = (0.9, 1.1)          # per part (and inertia)
+    total_mass_scale: tuple = (1.0, 1.15)   # whole robot
+    torso_mass_scale: tuple = (1.0, 1.25)   # torso only
+    com_offset: float = 0.015               # torso CoM shift, m
     # Servo torque and speed scale with voltage, rated at 11.1 V: 3S LiPo full 12.6 V (x1.13)
     # to near-empty ~10.5 V (x0.95), lower bound extra for servo variance and heat.
     servo_strength: tuple = (0.85, 1.13)
     servo_speed: tuple = (0.85, 1.13)
+    voltage_coupled: bool = True            # one battery-voltage draw scales torque AND speed together
+                                            # (servo_strength range; +-5% per servo on top). False: separate
     kp_scale: tuple = (0.7, 1.3)
     kd_scale: tuple = (0.7, 1.3)
     armature_scale: tuple = (0.5, 1.5)
     frictionloss_scale: tuple = (0.5, 2.0)
-    latency: tuple = (0.005, 0.019)         # s, sensor read -> servo moving (UART bus round trips)
+    latency: tuple = (0.005, 0.019)         # s, within one control step, before the new target applies
+    # Whole control steps of delay on top (20 ms each): reading 8 bus servos through the USB adapter
+    # likely takes 20-30 ms, so the real loop may lag a step or two. Total action delay: 5-59 ms.
+    action_delay_steps: tuple = (0, 2)      # new servo targets take effect this many steps late
+    obs_delay_steps: tuple = (0, 1)         # IMU and joint readings are this many steps old
+    # Servo imperfections
+    backlash: tuple = (0.0, 0.017)          # rad (0-1 deg) of gear slack per joint: no restoring torque inside it
+    joint_resolution: float = 0.0042        # rad: HTD-35H reports 0-1000 counts over 240 deg (0.24 deg)
+    joint_offset: float = 0.03              # rad: per-servo zero calibration error (+-1.7 deg)
+    # IMU (BNO055) errors that stay the same through an episode: tilt bias from accelerometer offset and
+    # mounting, and gyro zero-rate offset. They matter more than its (small) white noise.
+    imu_tilt_bias_deg: float = 2.5          # +- per axis (roll, pitch) of the gravity reading
+    gyro_bias: float = 0.02                 # rad/s +- per axis
     floor_tilt_deg: float = 3.0             # simulated slope via tilted gravity
     push_interval: tuple = (2.0, 4.0)       # s between random shoves
     push_velocity: float = 0.3              # m/s added to the torso
@@ -193,6 +216,17 @@ class RandomizationConfig:
     noise_yaw: float = 0.03                 # rad, IMU heading
     noise_joint_pos: float = 0.01           # rad
     noise_joint_vel: float = 0.5            # rad/s
+
+
+# Values for settings missing from older run configs, so those runs load and behave as trained.
+LEGACY = {
+    "mirror_symmetry": False,
+    "command": {"mode": "forward"},
+    "rewards": {"break_requires_load": 0.0},
+    "randomization": {"total_mass_scale": (1.0, 1.0), "torso_mass_scale": (1.0, 1.0), "voltage_coupled": False,
+                      "action_delay_steps": (0, 0), "obs_delay_steps": (0, 0), "backlash": (0.0, 0.0),
+                      "joint_resolution": 0.0, "joint_offset": 0.0, "imu_tilt_bias_deg": 0.0, "gyro_bias": 0.0},
+}
 
 
 @dataclass
@@ -221,6 +255,8 @@ class EnvConfig:
         def build(sub_cls, values):  # JSON turns tuples into lists
             return sub_cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in values.items()})
 
-        d = {"mirror_symmetry": False, **d, "command": {"mode": "forward", **d.get("command", {})}}  # older runs
+        # Settings added after a run was saved get the value that reproduces that run's behaviour.
+        d = {**{k: v for k, v in LEGACY.items() if k not in nested}, **d}
+        d.update({k: {**LEGACY.get(k, {}), **d.get(k, {})} for k in nested})
 
         return cls(**{k: build(nested[k], v) if k in nested else v for k, v in d.items()})

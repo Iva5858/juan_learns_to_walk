@@ -70,10 +70,14 @@ Physics check: with 3.4 Nm, 5.8 rad/s servos and 1.75 kg, a real flight phase is
 ## 3. Robustness (sim-to-real)
 
 Everything below is randomized every episode (`RandomizationConfig`):
-- **Servos**: torque and speed −15%/+13% (3S LiPo from full to near-empty, rated at 11.1 V), stiffness, damping, 5–19 ms latency (UART bus round trips)
-- **Body**: link masses ±10%, torso center of mass ±1 cm, reflected rotor inertia, gearbox friction
-- **Environment**: floor friction 0.4–1.2, slopes up to 3°, random shoves every 2–4 s
+- **Servos**: one battery-voltage draw scales torque and speed together (−15%/+13%: 3S LiPo from full to near-empty, rated at 11.1 V), ±5% per servo, stiffness, damping, 0–1° gear slack, ±1.7° zero-calibration error, 0.24° position resolution
+- **Delay**: 5–59 ms from reading the sensors to the servos moving (sub-step latency plus 0–2 whole control steps), and IMU/joint readings up to one step old. Reading 8 bus servos over USB likely takes 20–30 ms: measure it on the robot and narrow this range
+- **Body**: 1.65–2.25 kg (each part ±10%, the whole robot up to +15%, the torso up to +25% more: a heavy, high torso is the hard case), torso center of mass ±1.5 cm, reflected rotor inertia, gearbox friction
+- **IMU**: a tilt bias of up to ±2.5° and a gyro offset of up to ±0.02 rad/s that stay fixed through the episode (BNO055 accelerometer offset and mounting), plus noise
+- **Environment**: floor friction 0.5–1.2, slopes up to 3°, random shoves every 2–4 s
 - **Sensors**: noise on the IMU and joint readings
+
+Runs saved before a setting existed load with it off (`LEGACY` in config.py), so old runs evaluate exactly as they were trained.
 
 The servo itself is simulated, not idealized: PD control + linear torque–speed curve + latency.
 

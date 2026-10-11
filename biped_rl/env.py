@@ -105,7 +105,11 @@ class BipedEnv(gym.Env):
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self.nu,), dtype=np.float32)
         self.observation_space = spaces.Box(-np.inf, np.inf, dtype=np.float64,
                                             shape=(self.actor_obs_dim + privileged_dim,))
-        self._history = deque(maxlen=cfg.history)
+        # Sensor readings and actions are kept separately: readings can arrive late (obs_delay_steps),
+        # the policy's own previous actions never do.
+        self._sensor_buf = deque(maxlen=cfg.history + cfg.randomization.obs_delay_steps[1])
+        self._action_buf = deque(maxlen=cfg.history)
+        self._target_buf = deque(maxlen=cfg.randomization.action_delay_steps[1] + 1)
         self._max_steps = int(cfg.episode_seconds / self.dt)
 
     # ------------------------------------------------------------------ setup
@@ -163,6 +167,11 @@ class BipedEnv(gym.Env):
         self._kd = np.full(self.nu, r.kd)
         self._latency_steps = 0
         self._friction_scale = 1.0
+        self._act_delay = self._obs_delay = 0
+        self._backlash = np.zeros(self.nu)
+        self._joint_off = np.zeros(self.nu)
+        self._grav_bias = np.eye(3)
+        self._gyro_bias = np.zeros(3)
 
     def _randomize_physics(self):
         m, n, c, rng = self.model, self._nominal, self.cfg.randomization, self.np_random
@@ -180,12 +189,39 @@ class BipedEnv(gym.Env):
         m.opt.gravity[:] = g * np.array([np.sin(tilt) * np.cos(heading),
                                          np.sin(tilt) * np.sin(heading), -np.cos(tilt)])
         r = self.cfg.robot
-        self._stall = r.stall_torque * rng.uniform(*c.servo_strength) * rng.uniform(0.95, 1.05, nu)
-        self._speed = r.no_load_speed * rng.uniform(*c.servo_speed) * rng.uniform(0.95, 1.05, nu)
+        if c.voltage_coupled:  # one battery voltage: torque and speed rise and fall together
+            volt = rng.uniform(*c.servo_strength)
+            self._stall = r.stall_torque * volt * rng.uniform(0.95, 1.05, nu)
+            self._speed = r.no_load_speed * volt * rng.uniform(0.95, 1.05, nu)
+        else:
+            self._stall = r.stall_torque * rng.uniform(*c.servo_strength) * rng.uniform(0.95, 1.05, nu)
+            self._speed = r.no_load_speed * rng.uniform(*c.servo_speed) * rng.uniform(0.95, 1.05, nu)
         self._kp = r.kp * rng.uniform(*c.kp_scale, size=nu)
         self._kd = r.kd * rng.uniform(*c.kd_scale, size=nu)
         lat = int(rng.uniform(*c.latency) / m.opt.timestep)
         self._latency_steps = min(lat, self.frame_skip - 1)
+        # Below: drawn after everything above and only when switched on, so configs without these
+        # settings (runs up to juan_v6) get exactly the same random draws as when they were trained.
+        if tuple(c.total_mass_scale) != (1.0, 1.0) or tuple(c.torso_mass_scale) != (1.0, 1.0):
+            extra = np.full(m.nbody, rng.uniform(*c.total_mass_scale))
+            extra[self._root] *= rng.uniform(*c.torso_mass_scale)
+            m.body_mass[:] *= extra
+            m.body_inertia[:] *= extra[:, None]
+        if c.action_delay_steps[1] > 0:
+            self._act_delay = int(rng.integers(c.action_delay_steps[0], c.action_delay_steps[1] + 1))
+        if c.obs_delay_steps[1] > 0:
+            self._obs_delay = int(rng.integers(c.obs_delay_steps[0], c.obs_delay_steps[1] + 1))
+        if c.backlash[1] > 0:
+            self._backlash = rng.uniform(*c.backlash, size=nu)
+        if c.joint_offset > 0:
+            self._joint_off = rng.uniform(-c.joint_offset, c.joint_offset, nu)
+        if c.imu_tilt_bias_deg > 0:
+            roll, pitch = np.radians(rng.uniform(-c.imu_tilt_bias_deg, c.imu_tilt_bias_deg, 2))
+            cr, sr, cp, sp = np.cos(roll), np.sin(roll), np.cos(pitch), np.sin(pitch)
+            self._grav_bias = (np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
+                               @ np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]]))
+        if c.gyro_bias > 0:
+            self._gyro_bias = rng.uniform(-c.gyro_bias, c.gyro_bias, 3)
 
     # ------------------------------------------------------------------ sensing
     def _root_rot(self):
@@ -228,18 +264,31 @@ class BipedEnv(gym.Env):
             pts[leg] = p
         return pts, vel
 
-    def _sensor_frame(self):
-        """What the real robot measures this control step (plus noise)."""
+    def _read_sensors(self):
+        """What the real robot measures this control step: IMU gravity direction and gyro (with a
+        per-episode bias and noise), and servo angles (with a calibration offset, the servo's
+        0.24 deg resolution and noise) and speeds."""
         d, c, rng = self.data, self.cfg.randomization, self.np_random
         noisy = c.enabled
         noise = lambda scale, n: rng.normal(0, scale, n) if noisy else 0.0
-        parts = [self._gravity_body() + noise(c.noise_gravity, 3),
-                 d.qvel[3:6] + noise(c.noise_gyro, 3)]  # free-joint angular velocity is in body frame
+        parts = [self._grav_bias @ self._gravity_body() + noise(c.noise_gravity, 3),
+                 d.qvel[3:6] + self._gyro_bias + noise(c.noise_gyro, 3)]  # free-joint ang. vel. is in body frame
         if self.cfg.robot.joint_feedback:
-            parts += [d.qpos[self._qpos_idx] - self._home_joint + noise(c.noise_joint_pos, self.nu),
+            q = d.qpos[self._qpos_idx] - self._joint_off  # what a miscalibrated servo reports
+            if noisy and c.joint_resolution > 0:
+                q = np.round(q / c.joint_resolution) * c.joint_resolution
+            parts += [q - self._home_joint + noise(c.noise_joint_pos, self.nu),
                       0.1 * (d.qvel[self._dof_idx] + noise(c.noise_joint_vel, self.nu))]
-        parts.append(self._last_action)
         return np.concatenate(parts)
+
+    def _history_frames(self):
+        """Last `history` frames, oldest first: each is [sensor reading, action of that step].
+        Readings are obs_delay steps old; the oldest available one stands in at episode start."""
+        frames = []
+        for j in reversed(range(self.cfg.history)):
+            back = min(1 + j + self._obs_delay, len(self._sensor_buf))
+            frames.append(np.concatenate([self._sensor_buf[-back], self._action_buf[-1 - j]]))
+        return frames
 
     def _gait_period(self):
         """Faster rhythm at higher commands: a fixed rhythm caps top speed."""
@@ -290,7 +339,7 @@ class BipedEnv(gym.Env):
                                            if self.cfg.randomization.enabled else 0.0)
         cmd = self._cmd_vec if self._omni else [self._cmd]
         clock = [0.0, 0.0] if self._standing else [np.sin(ph), np.cos(ph)]  # stopped clock = stand
-        actor = np.concatenate([*self._history, cmd, clock, [np.sin(yaw_err), np.cos(yaw_err)]])
+        actor = np.concatenate([*self._history_frames(), cmd, clock, [np.sin(yaw_err), np.cos(yaw_err)]])
         privileged = np.concatenate([
             [self._lateral_offset()],
             self._root_rot().T @ d.qvel[0:3],
@@ -373,7 +422,6 @@ class BipedEnv(gym.Env):
         self._clearance = self._soles()[0][:, 2] - self._home_sole_z
         self._next_push = rng.uniform(*cfg.randomization.push_interval)
         self._last_push = -np.inf
-        self._history.clear()
         self._q_hist.clear()
         self._td_hist.clear()
         self._td_step = [None, None]   # control step of each foot's last touchdown
@@ -381,9 +429,10 @@ class BipedEnv(gym.Env):
         self._td_intervals = deque(maxlen=2)
         self._stride_est = None        # measured steps per full stride (from one foot's touchdowns)
         self._timing_asym = 0.0        # latest measured left/right step-timing asymmetry
-        frame = self._sensor_frame()
-        for _ in range(cfg.history):
-            self._history.append(frame)
+        reading = self._read_sensors()
+        self._sensor_buf.extend([reading] * self._sensor_buf.maxlen)
+        self._action_buf.extend([self._last_action] * cfg.history)
+        self._target_buf.extend([self._target] * self._target_buf.maxlen)
         return self._get_obs(), {}
 
     def _episode_was_safe(self):
@@ -409,6 +458,11 @@ class BipedEnv(gym.Env):
         a = cfg.action_filter
         self._filtered = a * action + (1 - a) * self._filtered
         new_target = np.clip(self._home_joint + cfg.action_scale * self._filtered, self._jnt_lo, self._jnt_hi)
+        self._target_buf.append(new_target)
+        new_target = self._target_buf[-1 - min(self._act_delay, len(self._target_buf) - 1)]  # bus delay
+        w = cfg.rewards
+        slack = self._backlash if self._backlash.any() else None
+        loaded_overspeed = False
 
         # Servo model, run at physics rate. (Plain ufuncs: this loop dominates step time.)
         qi, di, kp, kd, stall = self._qpos_idx, self._dof_idx, self._kp, self._kd, self._stall
@@ -421,7 +475,11 @@ class BipedEnv(gym.Env):
             if k == self._latency_steps:
                 self._target = new_target
             qd = d.qvel[di]
-            tau = kp * (self._target - d.qpos[qi]) - kd * qd
+            # A miscalibrated servo holds its own idea of the angle: physically target + offset.
+            err = self._target + self._joint_off - d.qpos[qi]
+            if slack is not None:  # gear slack: no restoring torque until the gap is taken up
+                err = np.sign(err) * np.maximum(np.abs(err) - slack, 0.0)
+            tau = kp * err - kd * qd
             # Linear torque-speed curve: no torque left at no-load speed.
             s = qd * inv_speed
             upper = stall * np.minimum(np.maximum(1.0 - s, 0.0), 1.0)
@@ -434,6 +492,9 @@ class BipedEnv(gym.Env):
             speed_ratio = np.abs(qd) * inv_speed
             overspeed += np.maximum(speed_ratio - 1.0, 0.0)
             peak_speed_ratio = max(peak_speed_ratio, speed_ratio.max())
+            if w.break_requires_load > 0:  # over-speed while the servo fights it: gear-stripping load
+                loaded_overspeed |= bool(np.any((speed_ratio > w.break_joint_speed)
+                                                & (np.abs(tau_c) > w.break_requires_load * stall)))
             peak_tau = np.maximum(peak_tau, np.abs(tau_c))
             d.ctrl[:] = tau_c
             mujoco.mj_step(m, d)
@@ -603,7 +664,8 @@ class BipedEnv(gym.Env):
             self._ep_peak[key] = max(self._ep_peak[key], val)
         # Hardware first: a landing or back-drive that could break the robot ends the episode
         # exactly like a fall.
-        broke = bool(impact_bw > w.break_impact or peak_speed_ratio > w.break_joint_speed)
+        overspeed_break = loaded_overspeed if w.break_requires_load > 0 else peak_speed_ratio > w.break_joint_speed
+        broke = bool(impact_bw > w.break_impact or overspeed_break)
         fell = bool(bad_contact or grav[2] > -0.6 or self._com_height() < 0.5 * self._home_height)
         terminated = fell or broke
         if terminated:
@@ -630,7 +692,8 @@ class BipedEnv(gym.Env):
         self._last_action2 = self._last_action
         self._last_action = action
         self._last_qvel = qd.copy()
-        self._history.append(self._sensor_frame())
+        self._sensor_buf.append(self._read_sensors())
+        self._action_buf.append(action)
 
         info = {f"rew/{k}": v for k, v in task.items()}
         info.update({f"pen/{k}": v for k, v in pen.items()})
