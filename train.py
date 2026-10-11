@@ -23,7 +23,8 @@ from stable_baselines3.common.logger import Video
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
-from biped_rl.config import EnvConfig, RewardWeights, RobotConfig, portable_model_path
+from biped_rl.config import (CommandConfig, EnvConfig, RandomizationConfig, RewardWeights, RobotConfig,
+                             portable_model_path)
 from biped_rl.env import BipedEnv
 from biped_rl.policy import AsymmetricActorCritic
 from biped_rl.symmetry import SymmetricRunningMeanStd, check_robot_mirror, mirror_maps
@@ -75,6 +76,8 @@ class TrainingDashboard(BaseCallback):
             self._add("2_commands/path_drift_cm", 100 * info["lateral_offset"])
             self._add("1_overview/speed_error_mps", info["speed_error"])
             self._add("1_overview/top_speed_command_mps", info["speed_max"])
+            self._add("1_overview/push_strength_mps_avg_direction", info["push_level_mean"])
+            self._add("1_overview/push_strength_mps_weakest_direction", info["push_level_min"])
             self._add("3_hardware/peak_torque_x_stall", info["peak_torque_stall"])
             self._add("3_hardware/peak_joint_speed_x_servo_max", info["max_joint_speed_ratio"])
             self._add("3_hardware/landing_force_x_body_weight", info["peak_force_bw"])
@@ -170,6 +173,24 @@ class SaveVecNormalize(BaseCallback):
         return True
 
 
+STAGES = ("walk", "commands", "physics", "pushes")
+
+
+def apply_stage(cfg, stage):
+    """Staged training (Li et al. 2024, Cassie): learn the skill first, then the variety of tasks,
+    then robustness. Pushes come last: frequent pushes early made Cassie's normal walking worse.
+      walk      nominal physics, no pushes; forward/backward and stand commands only (no sideways/turn)
+      commands  nominal physics, no pushes; all commands
+      physics   randomized physics (mass, delays, servos, IMU...), no pushes
+      pushes    randomized physics + the per-direction push curriculum
+    Each stage is a separate run that --resume's the previous one (see train_v7.sh)."""
+    rnd, cmd = cfg.randomization, cfg.command
+    rnd.enabled = stage in ("physics", "pushes")
+    cmd.straight_prob = 1.0 if stage == "walk" else CommandConfig().straight_prob
+    rnd.push_velocity = RandomizationConfig().push_velocity if stage == "pushes" else 0.0
+    rnd.push_curriculum = stage == "pushes"
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--run-name", default="walk_v1")
@@ -181,6 +202,8 @@ def main():
     p.add_argument("--swing-ratio", type=float, help=">0.5 gives a flight phase (running)")
     p.add_argument("--no-joint-feedback", action="store_true", help="servos cannot report their angle")
     p.add_argument("--resume", help="run directory to continue from (fine-tuning / curriculum)")
+    p.add_argument("--stage", choices=STAGES, help="training stage (see apply_stage); with --resume for "
+                   "all but the first")
     p.add_argument("--new-rewards", action="store_true",
                    help="with --resume: use the reward weights and robot settings in the current code")
     p.add_argument("--video-every", type=int, default=1_000_000, help="steps between walking clips")
@@ -216,13 +239,21 @@ def main():
         setattr(cfg.rewards, name, float(value))
     if args.no_joint_feedback:
         cfg.robot.joint_feedback = False
+    if args.stage:
+        apply_stage(cfg, args.stage)
     (run_dir / "config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
 
     env_kwargs = {"config": cfg.to_dict()}
     env = make_vec_env("biped_rl:Biped-v0", n_envs=args.n_envs, seed=0,
                        vec_env_cls=SubprocVecEnv, env_kwargs=env_kwargs)
     # Eval on the same randomized env (including pushes): measures robustness, not a best case.
-    eval_env = DummyVecEnv([lambda: Monitor(BipedEnv(cfg.to_dict()))])
+    # With pushes on, evaluation uses the fixed standard test instead of the curriculum (random shoves
+    # up to 0.3 m/s per axis, as for juan_v3/v6), so stages and runs are comparable.
+    eval_cfg = EnvConfig.from_dict(cfg.to_dict())
+    if eval_cfg.randomization.push_velocity > 0:
+        eval_cfg.randomization.push_curriculum = False
+        eval_cfg.randomization.push_velocity = 0.3
+    eval_env = DummyVecEnv([lambda: Monitor(BipedEnv(eval_cfg.to_dict()))])
 
     if args.resume:
         env = VecNormalize.load(str(Path(args.resume) / "vecnormalize.pkl"), env)

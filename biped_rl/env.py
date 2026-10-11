@@ -96,6 +96,10 @@ class BipedEnv(gym.Env):
         }
         self._set_nominal_physics()
         self._speed_max = cfg.command.speed_range[1]  # speed curriculum, grows during training
+        # Push curriculum: one strength per push direction (relative to the robot), kept across episodes.
+        self._push_level = np.full(8, cfg.randomization.push_start)
+        self._push_tally = np.zeros((8, 2))  # per direction: [stayed up, pushes]
+        self._pending_push = None            # (direction, time) of a push whose outcome is not known yet
 
         self._omni = cfg.command.mode == "omni"
         frame_dim = 6 + (2 * self.nu if cfg.robot.joint_feedback else 0) + self.nu
@@ -422,6 +426,7 @@ class BipedEnv(gym.Env):
         self._clearance = self._soles()[0][:, 2] - self._home_sole_z
         self._next_push = rng.uniform(*cfg.randomization.push_interval)
         self._last_push = -np.inf
+        self._pending_push = None
         self._q_hist.clear()
         self._td_hist.clear()
         self._td_step = [None, None]   # control step of each foot's last touchdown
@@ -451,6 +456,18 @@ class BipedEnv(gym.Env):
             self._speed_max = max(c.speed_range[1], self._speed_max - c.curriculum_step)
         elif self._ep_speed_err / self._steps < 0.25 * top and self._episode_was_safe():
             self._speed_max = min(c.speed_limit, self._speed_max + c.curriculum_step)
+
+    def _score_push(self, k, stayed_up):
+        """Push curriculum: after every push_window pushes from direction k, make that direction
+        stronger if the robot stayed up through at least push_success of them, weaker otherwise."""
+        rc = self.cfg.randomization
+        self._pending_push = None
+        self._push_tally[k] += (float(stayed_up), 1.0)
+        if self._push_tally[k, 1] >= rc.push_window:
+            ok = self._push_tally[k, 0] / self._push_tally[k, 1] >= rc.push_success
+            self._push_level[k] = np.clip(self._push_level[k] + (rc.push_step if ok else -rc.push_step),
+                                          rc.push_start, rc.push_velocity)
+            self._push_tally[k] = 0.0
 
     def step(self, action):
         cfg, m, d = self.cfg, self.model, self.data
@@ -676,8 +693,18 @@ class BipedEnv(gym.Env):
 
         # Random shoves (robustness).
         rc = cfg.randomization
-        if rc.enabled and self._t >= self._next_push:
-            push = self.np_random.uniform(-rc.push_velocity, rc.push_velocity, 2)
+        if self._pending_push is not None and (terminated or truncated or self._t - self._pending_push[1] >= 2.0):
+            self._score_push(self._pending_push[0], stayed_up=not terminated)
+        if rc.enabled and rc.push_velocity > 0 and self._t >= self._next_push:
+            if rc.push_curriculum:
+                k = int(self.np_random.integers(8))
+                yaw = np.arctan2(R[1, 0], R[0, 0])
+                angle = yaw + (k + self.np_random.uniform()) * np.pi / 4  # direction k: [k*45, (k+1)*45) deg
+                strength = min(self._push_level[k] * self.np_random.uniform(0.75, 1.1), rc.push_velocity)
+                push = strength * np.array([np.cos(angle), np.sin(angle)])
+                self._pending_push = (k, self._t)
+            else:
+                push = self.np_random.uniform(-rc.push_velocity, rc.push_velocity, 2)
             d.qvel[0:2] += push
             self._last_push = self._t
             self._last_push_vec = push  # for drawing the shove in videos
@@ -714,6 +741,7 @@ class BipedEnv(gym.Env):
             "action_delta": np.mean(np.abs(action - self._last_action2)),
             "base_height": self._com_height(),
             "recovering": float(recovering),
+            "push_level_mean": float(self._push_level.mean()), "push_level_min": float(self._push_level.min()),
         })
         return self._get_obs(), reward, terminated, truncated, info
 

@@ -39,8 +39,8 @@ def portable_model_path(path):
 
 @dataclass
 class RobotConfig:
-    model_path: str = str(MODELS / "simple_biped.xml")
-    foot_bodies: tuple = ("l_foot", "r_foot")  # (left, right) body names in the MJCF
+    model_path: str = "juan/rl_scene.xml"   # relative to the project; models/simple_biped.xml = placeholder
+    foot_bodies: tuple = ("left_foot_link", "right_foot_link")  # (left, right) body names in the MJCF
     # Hiwonder HTD-35H bus servo at 11.1 V. Simulated in the env (PD + torque-speed
     # curve), so the MJCF actuator type does not matter.
     stall_torque: float = 3.43   # Nm (35 kg·cm * 0.0981)
@@ -103,17 +103,17 @@ class RewardWeights:
       negative (falling early never pays) and penalties still bite when things go badly.
     """
     # --- 1. straight-line speed (task terms, gated by tracking) ---
-    tracking_vel: float = 2.0        # the tracking factor itself, as a reward
+    tracking_vel: float = 3.0        # the tracking factor itself, as a reward (juan_v3 weights from here)
     # tracking = (1-share) * exp(-err^2 / sigma2) + share * exp(-err^2 / broad_sigma2), err in m/s.
     # The broad part rewards creeping over standing (needed to learn to walk at all); once it walks,
     # a forgiving kernel lets it trade speed away for small penalty savings, so sharpen it.
-    tracking_sigma2: float = 0.02
+    tracking_sigma2: float = 0.008
     tracking_broad_sigma2: float = 0.08
-    tracking_broad_share: float = 0.5
+    tracking_broad_share: float = 0.15
     tracking_lat_yaw: float = 0.5    # no sideways drift, no turning
     heading: float = 1.0             # keep facing the start direction
     # --- 4. gait shape (task terms, gated by tracking) ---
-    gait_contact: float = 1.5        # feet on the ground when the gait clock says stance
+    gait_contact: float = 1.0        # feet on the ground when the gait clock says stance
     feet_clearance: float = 0.3      # swing sole reaches swing_height (no shuffling / toe drag)
     flight: float = 0.0              # bonus when both feet are off the ground while moving
     # --- 2. don't fall ---
@@ -132,7 +132,7 @@ class RewardWeights:
                                      # [rad^2]. Off: replaced by the mirror-symmetric policy (v4 used 15
                                      # and skipped)
     # --- wear per cycle (penalties count events, so many small gentle motions are not free) ---
-    gait_mismatch: float = 1.0       # fraction of feet on/off the ground against the gait clock
+    gait_mismatch: float = 0.5       # fraction of feet on/off the ground against the gait clock
     footstep: float = 1.0            # per touchdown: fewer, rhythm-paced steps = fewer impact cycles
     reversals: float = 0.1           # per servo direction reversal (gear backlash hammering, pot wear)
     orientation: float = 2.0         # torso tilt (roll/pitch)
@@ -210,7 +210,18 @@ class RandomizationConfig:
     gyro_bias: float = 0.02                 # rad/s +- per axis
     floor_tilt_deg: float = 3.0             # simulated slope via tilted gravity
     push_interval: tuple = (2.0, 4.0)       # s between random shoves
-    push_velocity: float = 0.3              # m/s added to the torso
+    push_velocity: float = 0.4              # m/s added to the torso: the cap (push_curriculum) or, without
+                                            # the curriculum, the range per axis (runs up to juan_v6: 0.3)
+    # Push curriculum (Kumar's "region of attraction"): 8 push directions relative to the robot, each
+    # with its own strength. A direction gets push_step stronger once the robot stays up through
+    # push_success of push_window pushes from it (no fall within 2 s), weaker otherwise; each push
+    # is 0.75-1.1x its direction's strength. The policy trains at the edge of what it can take, per
+    # direction (sideways is harder for a biped), without big early pushes teaching mostly falling.
+    push_curriculum: bool = True
+    push_start: float = 0.05                # m/s, every direction's first strength
+    push_step: float = 0.02                 # m/s
+    push_window: int = 10
+    push_success: float = 0.9
     noise_gravity: float = 0.03
     noise_gyro: float = 0.1                 # rad/s
     noise_yaw: float = 0.03                 # rad, IMU heading
@@ -225,7 +236,8 @@ LEGACY = {
     "rewards": {"break_requires_load": 0.0},
     "randomization": {"total_mass_scale": (1.0, 1.0), "torso_mass_scale": (1.0, 1.0), "voltage_coupled": False,
                       "action_delay_steps": (0, 0), "obs_delay_steps": (0, 0), "backlash": (0.0, 0.0),
-                      "joint_resolution": 0.0, "joint_offset": 0.0, "imu_tilt_bias_deg": 0.0, "gyro_bias": 0.0},
+                      "joint_resolution": 0.0, "joint_offset": 0.0, "imu_tilt_bias_deg": 0.0, "gyro_bias": 0.0,
+                      "push_curriculum": False},
 }
 
 
