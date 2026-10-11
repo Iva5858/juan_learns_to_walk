@@ -33,7 +33,8 @@ class RewardTermLogger(BaseCallback):
 
     KEYS = ("speed_error", "tracking", "penalty_scale", "speed_max", "base_height",
             "peak_torque_stall", "max_joint_speed_ratio", "broke", "fell", "recovering",
-            "heading_error_deg", "lateral_offset", "forward_velocity", "flight", "double_support", "peak_force_bw", "saturation", "action_delta")
+            "heading_error_deg", "lateral_offset", "forward_velocity", "flight", "double_support", "peak_force_bw", "saturation", "action_delta",
+            "standing", "lateral_velocity", "command_lateral", "yaw_rate", "command_yaw_rate")
 
     def _on_rollout_start(self):
         self._sums, self._count = {}, 0

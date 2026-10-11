@@ -64,7 +64,18 @@ class RobotConfig:
 
 @dataclass
 class CommandConfig:
-    # Forward speed command, sampled per episode. The upper end grows automatically
+    # "omni": forward, sideways and turn-rate commands plus "stand", re-drawn every few seconds
+    # (task randomization: walking many ways is what lets a policy step out of trouble, and it
+    # is what joystick steering needs). "forward": one forward speed per episode, as in runs up
+    # to juan_v6; configs saved without this key load as "forward".
+    mode: str = "omni"
+    lateral_range: tuple = (-0.1, 0.1)   # sideways speed command [m/s], + = left
+    yaw_rate_range: tuple = (-0.6, 0.6)  # turn-rate command [rad/s], + = left (~35 deg/s)
+    backward_speed: float = 0.1          # forward commands are drawn from [-backward_speed, top]
+    stand_prob: float = 0.1              # share of commands that are "stand still, feet down"
+    straight_prob: float = 0.3           # share of walking commands with no sideways/turn part
+    resample_interval: tuple = (2.0, 8.0)  # s between new commands within an episode
+    # Forward speed command. The upper end grows automatically
     # (speed curriculum) while the robot tracks its top commands without falling,
     # up to speed_limit: the sim finds the real top speed instead of a guess.
     speed_range: tuple = (0.0, 0.4)  # starting range [m/s]
@@ -203,5 +214,7 @@ class EnvConfig:
 
         def build(sub_cls, values):  # JSON turns tuples into lists
             return sub_cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in values.items()})
+
+        d = {**d, "command": {"mode": "forward", **d.get("command", {})}}  # pre-omni runs
 
         return cls(**{k: build(nested[k], v) if k in nested else v for k, v in d.items()})

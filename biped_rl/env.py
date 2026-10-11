@@ -97,8 +97,10 @@ class BipedEnv(gym.Env):
         self._set_nominal_physics()
         self._speed_max = cfg.command.speed_range[1]  # speed curriculum, grows during training
 
+        self._omni = cfg.command.mode == "omni"
         frame_dim = 6 + (2 * self.nu if cfg.robot.joint_feedback else 0) + self.nu
-        self.actor_obs_dim = cfg.history * frame_dim + 3 + 2  # + command, clock (2), heading error (2)
+        cmd_dim = 3 if self._omni else 1  # (forward, sideways, turn rate) or forward only
+        self.actor_obs_dim = cfg.history * frame_dim + cmd_dim + 2 + 2  # + clock (2), heading error (2)
         privileged_dim = 1 + 3 + 1 + 2 + 2 + 2 * self.nu + 1
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self.nu,), dtype=np.float32)
         self.observation_space = spaces.Box(-np.inf, np.inf, dtype=np.float64,
@@ -242,31 +244,53 @@ class BipedEnv(gym.Env):
     def _gait_period(self):
         """Faster rhythm at higher commands: a fixed rhythm caps top speed."""
         c = self.cfg.command
-        frac = min(self._cmd / c.fast_speed, 1.0)
+        speed = np.hypot(self._cmd_vec[0], self._cmd_vec[1])
+        frac = min(speed / c.fast_speed, 1.0)
         return c.gait_period - (c.gait_period - c.gait_period_fast) * frac
 
     def _phase(self):
         return self._phase_acc % 1.0
 
+    def _sample_command(self):
+        """Draw (forward, sideways, turn rate) and whether to stand. Forward speeds come from
+        [-backward_speed, top of the speed curriculum]; a share of commands is straight walking."""
+        c, rng = self.cfg.command, self.np_random
+        self._standing = bool(rng.uniform() < c.stand_prob)
+        if self._standing:
+            self._cmd_vec = np.zeros(3)
+        else:
+            vx = rng.uniform(-c.backward_speed, self._speed_max)
+            if rng.uniform() < c.straight_prob:
+                vy = wz = 0.0
+            else:
+                vy, wz = rng.uniform(*c.lateral_range), rng.uniform(*c.yaw_rate_range)
+            self._cmd_vec = np.array([vx, vy, wz])
+        self._cmd = float(self._cmd_vec[0])
+        self._ep_max_cmd = max(self._ep_max_cmd, self._cmd)
+
     def _heading_error(self):
-        """Yaw relative to the episode's target direction, wrapped to [-pi, pi].
-        On the robot: IMU yaw minus the yaw recorded when the walk started."""
+        """Yaw relative to the target heading, wrapped to [-pi, pi]. The target is the start
+        heading turned by the integrated turn-rate command. On the robot: IMU yaw minus the
+        yaw recorded at the start, minus the integrated joystick turn rate."""
         R = self._root_rot()
         yaw = np.arctan2(R[1, 0], R[0, 0])
-        return (yaw - self._heading0 + np.pi) % (2 * np.pi) - np.pi
+        return (yaw - self._heading_target + np.pi) % (2 * np.pi) - np.pi
 
     def _lateral_offset(self):
-        """Signed distance from the straight line through the start point (privileged)."""
-        dx, dy = self.data.qpos[0:2] - self._start_xy
-        return -np.sin(self._heading0) * dx + np.cos(self._heading0) * dy
+        """Signed sideways distance from the commanded path (privileged). The reference point
+        follows the robot along the target heading and moves sideways only as commanded, so
+        drifting off a straight line is measured, but falling behind on speed is not."""
+        side = np.array([-np.sin(self._heading_target), np.cos(self._heading_target)])
+        return float(side @ (self.data.qpos[0:2] - self._ref_xy))
 
     def _get_obs(self):
         d = self.data
         ph = 2 * np.pi * self._phase()
         yaw_err = self._heading_error() + (self.np_random.normal(0, self.cfg.randomization.noise_yaw)
                                            if self.cfg.randomization.enabled else 0.0)
-        actor = np.concatenate([*self._history, [self._cmd, np.sin(ph), np.cos(ph),
-                                                 np.sin(yaw_err), np.cos(yaw_err)]])
+        cmd = self._cmd_vec if self._omni else [self._cmd]
+        clock = [0.0, 0.0] if self._standing else [np.sin(ph), np.cos(ph)]  # stopped clock = stand
+        actor = np.concatenate([*self._history, cmd, clock, [np.sin(yaw_err), np.cos(yaw_err)]])
         privileged = np.concatenate([
             [self._lateral_offset()],
             self._root_rot().T @ d.qvel[0:3],
@@ -311,13 +335,31 @@ class BipedEnv(gym.Env):
         mujoco.mju_mulQuat(quat, yaw_quat, d.qpos[3:7].copy())
         d.qpos[3:7] = quat
         self._start_xy = d.qpos[0:2].copy()
+        self._ref_xy = self._start_xy.copy()
+        self._heading_target = self._heading0
         d.qpos[self._qpos_idx] += rng.uniform(-0.05, 0.05, self.nu)
         d.qvel[:] = rng.uniform(-0.05, 0.05, self.model.nv)
         mujoco.mj_forward(self.model, d)
 
-        self._cmd_fixed = bool(options and "speed" in options)
-        lo = cfg.command.speed_range[0]
-        self._cmd = float(options["speed"]) if self._cmd_fixed else rng.uniform(lo, self._speed_max)
+        # Commands. options={"speed": v} (forward only) or {"command": (vx, vy, yaw_rate)} or
+        # {"stand": True} fix the command for the whole episode (evaluation, videos).
+        options = options or {}
+        self._cmd_fixed = any(k in options for k in ("speed", "command", "stand"))
+        self._standing, self._ep_max_cmd = False, -np.inf
+        if "stand" in options:
+            self._standing, self._cmd_vec = bool(options["stand"]), np.zeros(3)
+        elif "command" in options:
+            self._cmd_vec = np.array(options["command"], dtype=float)
+        elif "speed" in options:
+            self._cmd_vec = np.array([float(options["speed"]), 0.0, 0.0])
+        elif self._omni:
+            self._sample_command()
+        else:
+            self._cmd_vec = np.array([rng.uniform(cfg.command.speed_range[0], self._speed_max), 0.0, 0.0])
+        self._cmd = float(self._cmd_vec[0])
+        self._ep_max_cmd = max(self._ep_max_cmd, self._cmd)
+        # (Only drawn in omni mode, so forward-mode runs see the same random stream as before.)
+        self._next_resample = rng.uniform(*cfg.command.resample_interval) if self._omni else np.inf
         self._t, self._steps, self._ep_speed_err = 0.0, 0, 0.0
         self._ep_peak = {"torque": 0.0, "speed": 0.0, "impact": 0.0}  # hardware-load maxima this episode
         self._phase_acc = rng.uniform()
@@ -353,11 +395,12 @@ class BipedEnv(gym.Env):
         """Promote the top speed when top commands are tracked through a whole episode;
         demote when the robot falls at the top. Each training env keeps its own."""
         c = self.cfg.command
-        if self._cmd_fixed or not self.cfg.randomization.enabled or self._cmd < 0.75 * self._speed_max:
+        top = self._ep_max_cmd  # with commands re-drawn mid-episode: the fastest one asked for
+        if self._cmd_fixed or not self.cfg.randomization.enabled or top < 0.75 * self._speed_max:
             return
         if fell:
             self._speed_max = max(c.speed_range[1], self._speed_max - c.curriculum_step)
-        elif self._ep_speed_err / self._steps < 0.25 * self._cmd and self._episode_was_safe():
+        elif self._ep_speed_err / self._steps < 0.25 * top and self._episode_was_safe():
             self._speed_max = min(c.speed_limit, self._speed_max + c.curriculum_step)
 
     def step(self, action):
@@ -401,18 +444,25 @@ class BipedEnv(gym.Env):
         self._t += self.dt
         self._steps += 1
         self._phase_acc += self.dt / self._gait_period()
+        cvx, cvy, cwz = self._cmd_vec
+        self._heading_target += cwz * self.dt
 
         # ---------------------------------------------------------- state for rewards
         R = self._root_rot()
         grav = self._gravity_body()
-        # Velocity along the episode's FIXED target direction, not the robot's current
-        # facing: walking in circles averages to zero forward speed. Computed from the
-        # distance moved over the whole control step, so no instant can be "timed".
-        ch, sh = np.cos(self._heading0), np.sin(self._heading0)
+        # Velocity along the TARGET heading (the start heading, turned only as commanded), not
+        # the robot's current facing: walking in circles earns no forward speed. Computed from
+        # the distance moved over the whole control step, so no instant can be "timed".
+        ch, sh = np.cos(self._heading_target), np.sin(self._heading_target)
         vel_xy = (d.qpos[0:2] - xy_before) / self.dt
         vx = ch * vel_xy[0] + sh * vel_xy[1]
         vy = -sh * vel_xy[0] + ch * vel_xy[1]
         yaw_err = self._heading_error()
+        # Commanded path: the reference moves sideways as commanded and is pulled along the
+        # heading to wherever the robot is, so only sideways drift counts.
+        ahead, side = np.array([ch, sh]), np.array([-sh, ch])
+        self._ref_xy = self._ref_xy + cvy * self.dt * side
+        self._ref_xy = self._ref_xy + ahead * (ahead @ (d.qpos[0:2] - self._ref_xy))
         offset = self._lateral_offset()
         ang_world = R @ d.qvel[3:6]
         qd = d.qvel[self._dof_idx]
@@ -445,6 +495,8 @@ class BipedEnv(gym.Env):
         c = cfg.command
         leg_phase = (self._phase() + np.array([0.0, 0.5])) % 1.0
         swing = leg_phase < c.swing_ratio
+        if self._standing:
+            swing = np.zeros(2, dtype=bool)  # both feet down: contact, clearance, mismatch follow
         q = d.qpos[self._qpos_idx]
         margin = 0.05 * (self._jnt_hi - self._jnt_lo)
         feet_y = (R.T @ (d.xpos[self._foot_body[0]] - d.xpos[self._foot_body[1]]))[1]
@@ -452,16 +504,18 @@ class BipedEnv(gym.Env):
 
         # How well the speed command is met, in [0, 1]. Narrow kernel for precision plus a
         # broad one so that creeping forward already beats standing still.
-        err = vx - self._cmd
+        err = vx - cvx
+        err2 = err ** 2 + ((vy - cvy) ** 2 if self._omni else 0.0)  # omni: sideways speed counts too
         share = w.tracking_broad_share
-        tracking = ((1 - share) * np.exp(-err ** 2 / w.tracking_sigma2)
-                    + share * np.exp(-err ** 2 / w.tracking_broad_sigma2))
-        self._ep_speed_err += abs(err)
+        tracking = ((1 - share) * np.exp(-err2 / w.tracking_sigma2)
+                    + share * np.exp(-err2 / w.tracking_broad_sigma2))
+        self._ep_speed_err += np.sqrt(err2)
 
         # Task terms: only pay while the command is being met (gated by `tracking`).
         task = {
             "tracking_vel": w.tracking_vel,
-            "tracking_lat_yaw": w.tracking_lat_yaw * np.exp(-(vy ** 2 + 0.25 * ang_world[2] ** 2) / 0.02),
+            "tracking_lat_yaw": w.tracking_lat_yaw * np.exp(
+                -((vy - cvy) ** 2 + 0.25 * (ang_world[2] - cwz) ** 2) / 0.02),
             "heading": w.heading * np.exp(-(yaw_err ** 2) / 0.05),  # ~13deg off -> 0.37
             "gait_contact": w.gait_contact * np.mean(self._contact == ~swing),
             "feet_clearance": w.feet_clearance * np.mean(
@@ -527,7 +581,8 @@ class BipedEnv(gym.Env):
         self._td_hist.append(touchdowns)
         stride_steps = int(round(self._gait_period() / self.dt))
         recent = sum(list(self._td_hist)[-stride_steps:])
-        pen["footstep"] = w.footstep * min(touchdowns, max(recent - 2.0, 0.0))
+        allowed = 0.0 if self._standing else 2.0  # standing: every step is an extra one
+        pen["footstep"] = w.footstep * min(touchdowns, max(recent - allowed, 0.0))
         pen["reversals"] = w.reversals * reversals
         # Not moving while commanded to walk: 0 at >= half the commanded speed, 1 when stopped.
         if self._cmd > 0.1:
@@ -566,6 +621,12 @@ class BipedEnv(gym.Env):
             self._last_push_vec = push  # for drawing the shove in videos
             self._next_push += self.np_random.uniform(*rc.push_interval)
 
+        # New command every few seconds (omni mode): the policy must change gait, turn, stop
+        # and start again mid-walk, like with a joystick.
+        if not self._cmd_fixed and self._t >= self._next_resample:
+            self._sample_command()
+            self._next_resample += self.np_random.uniform(*cfg.command.resample_interval)
+
         self._last_action2 = self._last_action
         self._last_action = action
         self._last_qvel = qd.copy()
@@ -574,7 +635,9 @@ class BipedEnv(gym.Env):
         info = {f"rew/{k}": v for k, v in task.items()}
         info.update({f"pen/{k}": v for k, v in pen.items()})
         info.update({
-            "forward_velocity": vx, "command": self._cmd, "x_position": d.qpos[0],
+            "forward_velocity": vx, "command": cvx, "x_position": d.qpos[0],
+            "lateral_velocity": vy, "command_lateral": cvy,
+            "yaw_rate": ang_world[2], "command_yaw_rate": cwz, "standing": float(self._standing),
             "speed_error": abs(err), "tracking": tracking, "penalty_scale": float(np.exp(-penalty)),
             "speed_max": self._speed_max,
             "heading_error_deg": abs(np.degrees(yaw_err)), "lateral_offset": abs(offset),
