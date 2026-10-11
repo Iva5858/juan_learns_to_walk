@@ -21,7 +21,7 @@ Onshape assembly ──onshape-to-robot──▶ MJCF ──inspect_model.py─�
 
 ```bash
 source .venv/bin/activate
-./train_v7.sh                                        # the current recipe: 4 stages, ~85M steps, ~9 h (see below)
+./train_v7.sh                                        # the current recipe: juan_v3 warm start + 3 stages, ~65M steps (see below)
 python train.py --run-name walk_v1                   # one run, 30M steps, ~1.5-2 h on this Mac; Ctrl+C saves
 tensorboard --logdir runs                            # http://localhost:6006, charts in groups 1_ to 6_
 python evaluate.py --run runs/walk_v1                # nominal physics + runs/walk_v1/eval.mp4
@@ -40,7 +40,7 @@ mjpython evaluate.py --run runs/walk_v1 --viewer     # live viewer (macOS needs 
 | 3 `physics` | randomized | all | none |
 | 4 `pushes` | randomized | all | per-direction curriculum, up to 0.4 m/s |
 
-Each stage is its own run (`runs/juan_v7_<n>_<stage>`) resuming the previous one. During stage 4 the evaluation keeps using the fixed standard test (random 0.3 m/s shoves), so results compare with juan_v3/v6.
+Each stage is its own run (`runs/juan_v7_<n>_<stage>`) resuming the previous one. Learning to walk from zero on Juan's model has so far got stuck standing still (every Juan policy inherited walking from the placeholder biped), so by default `train_v7.sh` skips stage 1: `tools/warm_start.py` copies juan_v3 into the v7 network (zero weight on the two new command inputs), which walks from the first step, and stages 2-4 train on top. `FROM=scratch ./train_v7.sh` runs all four stages from zero. During stage 4 the evaluation keeps using the fixed standard test (random 0.3 m/s shoves), so results compare with juan_v3/v6.
 
 What to watch in TensorBoard (groups are numbered in reading order):
 - `1_overview`: `falls_pct_of_episodes` and `hardware_limit_stops_pct_of_episodes` falling toward 0, `episode_seconds` rising to 20, `speed_error_mps` falling, `top_speed_command_mps` climbing (speed curriculum).

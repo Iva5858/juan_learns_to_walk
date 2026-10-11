@@ -173,20 +173,79 @@ class SaveVecNormalize(BaseCallback):
         return True
 
 
+def new_model(cfg, env, tensorboard_log=None):
+    """A fresh PPO model and the observation/reward normalization around `env` (a VecEnv).
+    Mirror-symmetric (policy and normalization) when cfg.mirror_symmetry. Returns (model, env)."""
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0, gamma=0.99)
+    probe = BipedEnv(cfg.to_dict())
+    actor_obs_dim = probe.actor_obs_dim
+    mirror = None
+    if cfg.mirror_symmetry:
+        mismatch = check_robot_mirror(probe)
+        print(f"mirror check: left/right part positions agree to {1000 * mismatch:.1f} mm", flush=True)
+        if mismatch > 0.005:
+            raise SystemExit("RobotConfig.mirror_pairs does not mirror this robot (a joint sign is "
+                             "wrong, or the robot is not symmetric): fix it or set mirror_symmetry=False")
+        mirror = mirror_maps(probe)
+        env.obs_rms = SymmetricRunningMeanStd(mirror[0], mirror[1], shape=env.observation_space.shape)
+    model = PPO(
+        AsymmetricActorCritic,
+        env,
+        n_steps=2048,          # x n_envs samples per update
+        batch_size=4096,
+        n_epochs=5,
+        learning_rate=3e-4,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_range=0.2,
+        ent_coef=0.0,
+        max_grad_norm=1.0,
+        target_kl=0.02,
+        policy_kwargs={
+            "actor_obs_dim": actor_obs_dim,
+            "mirror": mirror,
+            "net_arch": {"pi": [256, 128, 64], "vf": [512, 256, 128]},
+            "log_std_init": -1.0,
+            "activation_fn": torch.nn.ELU,
+        },
+        tensorboard_log=tensorboard_log,
+        device="cpu",
+        verbose=1,
+    )
+    return model, env
+
+
 STAGES = ("walk", "commands", "physics", "pushes")
 
 
 def apply_stage(cfg, stage):
     """Staged training (Li et al. 2024, Cassie): learn the skill first, then the variety of tasks,
     then robustness. Pushes come last: frequent pushes early made Cassie's normal walking worse.
-      walk      nominal physics, no pushes; forward/backward and stand commands only (no sideways/turn)
-      commands  nominal physics, no pushes; all commands
+      walk      nominal physics, no pushes; one forward speed (0 to top) per episode; forgiving
+                speed tracking
+      commands  nominal physics, no pushes; all commands (backward, stand, sideways, turning, changed
+                every few seconds); forgiving speed tracking
       physics   randomized physics (mass, delays, servos, IMU...), no pushes
       pushes    randomized physics + the per-direction push curriculum
     Each stage is a separate run that --resume's the previous one (see train_v7.sh)."""
-    rnd, cmd = cfg.randomization, cfg.command
+    rnd, cmd, w = cfg.randomization, cfg.command, cfg.rewards
     rnd.enabled = stage in ("physics", "pushes")
-    cmd.straight_prob = 1.0 if stage == "walk" else CommandConfig().straight_prob
+    # Speed-tracking kernel: forgiving while learning to walk (creeping must beat standing, or the
+    # policy settles for standing still), then sharp (juan_v3's) once it walks, so it can't trade
+    # speed away for small penalty savings.
+    learning = stage in ("walk", "commands")
+    w.tracking_vel = 2.0 if learning else RewardWeights().tracking_vel
+    w.tracking_sigma2 = 0.02 if learning else RewardWeights().tracking_sigma2
+    w.tracking_broad_share = 0.5 if learning else RewardWeights().tracking_broad_share
+    # Stage 1 is the task the forward-only runs learned to walk on: one forward speed per episode,
+    # no stand, no backward, no sideways/turning. With those mixed in from the start (~30% of
+    # commands near zero, a new command every few seconds), standing still won.
+    default = CommandConfig()
+    walk = stage == "walk"
+    cmd.straight_prob = 1.0 if walk else default.straight_prob
+    cmd.stand_prob = 0.0 if walk else default.stand_prob
+    cmd.backward_speed = 0.0 if walk else default.backward_speed
+    cmd.resample_interval = (1e9, 1e9) if walk else default.resample_interval
     rnd.push_velocity = RandomizationConfig().push_velocity if stage == "pushes" else 0.0
     rnd.push_curriculum = stage == "pushes"
 
@@ -262,42 +321,7 @@ def main():
                          tensorboard_log=str(run_dir), custom_objects=custom)
         print(f"resumed from {args.resume}, learning rate {model.learning_rate}", flush=True)
     else:
-        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0, gamma=0.99)
-        probe = BipedEnv(cfg.to_dict())
-        actor_obs_dim = probe.actor_obs_dim
-        mirror = None
-        if cfg.mirror_symmetry:
-            mismatch = check_robot_mirror(probe)
-            print(f"mirror check: left/right part positions agree to {1000 * mismatch:.1f} mm", flush=True)
-            if mismatch > 0.005:
-                raise SystemExit("RobotConfig.mirror_pairs does not mirror this robot (a joint sign is "
-                                 "wrong, or the robot is not symmetric): fix it or set mirror_symmetry=False")
-            mirror = mirror_maps(probe)
-            env.obs_rms = SymmetricRunningMeanStd(mirror[0], mirror[1], shape=env.observation_space.shape)
-        model = PPO(
-            AsymmetricActorCritic,
-            env,
-            n_steps=2048,          # x n_envs samples per update
-            batch_size=4096,
-            n_epochs=5,
-            learning_rate=3e-4,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            ent_coef=0.0,
-            max_grad_norm=1.0,
-            target_kl=0.02,
-            policy_kwargs={
-                "actor_obs_dim": actor_obs_dim,
-                "mirror": mirror,
-                "net_arch": {"pi": [256, 128, 64], "vf": [512, 256, 128]},
-                "log_std_init": -1.0,
-                "activation_fn": torch.nn.ELU,
-            },
-            tensorboard_log=str(run_dir),
-            device="cpu",
-            verbose=1,
-        )
+        model, env = new_model(cfg, env, tensorboard_log=str(run_dir))
     eval_env = VecNormalize(eval_env, training=False, norm_reward=False)
 
     callbacks = [
