@@ -4,6 +4,8 @@
 #
 #   ./train_v7.sh                 # all four stages
 #   ./train_v7.sh physics         # start at a later stage (the earlier ones must exist)
+#   SMOKE=1 ./train_v7.sh         # quick check of the whole chain: 1M steps per stage, ~30 min,
+#                                 # runs/smoke_v7_*, a video clip every 250k steps
 #
 # Stop with Ctrl+C at any time: the current stage saves its policy, and the script stops there.
 set -euo pipefail
@@ -13,6 +15,12 @@ NAME=juan_v7
 
 stages=(walk commands physics pushes)
 steps=(20000000 15000000 25000000 25000000)
+extra=()
+if [[ ${SMOKE:-0} == 1 ]]; then
+    NAME=smoke_v7
+    steps=(1000000 1000000 1000000 1000000)
+    extra=(--video-every 250000)
+fi
 start=${1:-walk}
 
 prev=""
@@ -26,7 +34,7 @@ for i in "${!stages[@]}"; do
         [[ -n $prev ]] && resume=(--resume "runs/$prev")
         echo "=== $(date '+%H:%M') stage $((i + 1))/4: $stage -> runs/$run ===" | tee -a "runs/$NAME.log"
         caffeinate -i $PY train.py --run-name "$run" --stage "$stage" --timesteps "${steps[$i]}" \
-            ${resume[@]+"${resume[@]}"} >> "runs/$NAME.log" 2>&1
+            ${resume[@]+"${resume[@]}"} ${extra[@]+"${extra[@]}"} >> "runs/$NAME.log" 2>&1
     fi
     prev=$run
 done
