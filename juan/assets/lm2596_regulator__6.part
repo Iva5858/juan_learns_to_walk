@@ -1,0 +1,13 @@
+{
+    "configuration": "default",
+    "documentId": "90e521e6daed83291de4e60e",
+    "documentMicroversion": "ee1cf4eda102413e4ea456da",
+    "elementId": "c2a3d43949370338aa1c6aa8",
+    "fullConfiguration": "default",
+    "id": "MCmR6Z9fHCuTjTF4r",
+    "isStandardContent": false,
+    "name": "LM2596 regulator <4>",
+    "partId": "KFjE",
+    "suppressed": false,
+    "type": "Part"
+}

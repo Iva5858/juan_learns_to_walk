@@ -1,0 +1,13 @@
+{
+    "configuration": "default",
+    "documentId": "90e521e6daed83291de4e60e",
+    "documentMicroversion": "ee1cf4eda102413e4ea456da",
+    "elementId": "c2a3d43949370338aa1c6aa8",
+    "fullConfiguration": "default",
+    "id": "Map8Nc3S99agscn0u",
+    "isStandardContent": false,
+    "name": "Adafruit BNO055 IMU <71>",
+    "partId": "KFTK",
+    "suppressed": false,
+    "type": "Part"
+}

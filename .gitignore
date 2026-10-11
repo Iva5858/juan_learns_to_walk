@@ -1,0 +1,19 @@
+# Python
+.venv/
+.venv_old_machine/
+__pycache__/
+*.pyc
+
+# Secrets (Onshape API keys) - never commit
+.env
+.env.*
+
+# Training outputs: keep only each run's config and report
+/runs/*
+!/runs/*/
+/runs/*/*
+!/runs/*/config.json
+!/runs/*/report.txt
+
+# macOS
+.DS_Store

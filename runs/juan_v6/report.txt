@@ -1,0 +1,101 @@
+=== juan_v6 vs v3 vs juan_v3@54M: wear and stride per meter (0.4 m/s) ===
+wear at a 0.4 m/s command, nominal physics, final models (lower per-meter = less wear)
+                               walk_v3juan_v3_at54M   juan_v6
+walked m/s                        0.41      0.41      0.41
+reversals per joint per m        24.84     22.56     13.81
+footsteps per m                  14.19     13.45      9.18
+step length cm (per foot)        14.09     14.87     21.78
+hip pitch range deg              21.22     23.61     36.30
+knee range deg                   17.64     17.03     18.79
+ankle range deg                  14.22     14.75     22.37
+
+=== Nominal physics, 0.4 m/s command, 8 episodes (final model) ===
+
+command 0.40 m/s, nominal physics
+ ep  fell  time s  speed  flight%  double%  impact×BW  sat%   |Δa|  power W    CoT max yaw° drift cm
+  0 False    20.0   0.40      0.0     18.3       1.84   1.8  0.083     3.92   0.57     12.8     82.5
+  1 False    20.0   0.40      0.0     18.8       1.81   1.7  0.085     3.95   0.57     12.2     69.7
+  2 False    20.0   0.40      0.0     17.8       1.86   1.8  0.084     3.95   0.57     14.0     84.6
+  3 False    20.0   0.40      0.0     18.1       1.84   1.8  0.082     3.92   0.57     12.4     92.0
+  4 False    20.0   0.40      0.0     19.3       1.83   1.8  0.084     3.94   0.57     17.3     76.1
+  5 False    20.0   0.40      0.0     17.8       1.85   1.8  0.083     3.91   0.57     11.4     84.8
+  6 False    20.0   0.40      0.0     18.2       1.81   1.8  0.083     3.90   0.56     12.1     86.2
+  7 False    20.0   0.40      0.0     17.3       1.80   1.9  0.086     3.99   0.58     19.0     76.8
+
+fall rate: 0%  mean speed: 0.40 m/s
+Video of episode 0: runs/juan_v6/eval.mp4
+
+=== Left vs right gait (final model) ===
+juan_v6 final model, nominal physics, 0.4 m/s command: walked 0.40 m/s
+                    left   right
+stance time s       0.30    0.34
+swing time s        0.24    0.20
+step length cm     17.51   19.47
+foot lift mm       21.50   10.43
+steps per second per leg: 1.8 (gait clock asks for 1.6)
+mean joint angle (deg), left vs right:
+  hip_roll       2.9    -6.2   (mirror: should be opposite sign)
+  hip_pitch    -27.2   -20.6
+  knee          59.6    55.2
+  ankle        -28.6   -31.8
+
+=== Top speed sweep, nominal physics (final model) ===
+ command  reached  falls  max yaw°  sat%  impact×BW
+     0.1     0.13   0/3      10.5   0.0       1.52
+     0.2     0.22   0/3      10.3   0.4       1.66
+     0.3     0.31   0/3       9.6   1.0       1.71
+     0.4     0.40   0/3      14.4   1.8       1.85
+     0.5     0.49   0/3      26.6   5.5       2.01
+     0.6     0.46   3/3      42.0  10.0       2.18
+     0.7     0.34   3/3      53.6   5.4       2.61
+     0.8     0.38   3/3      60.7   8.3       2.86
+     0.9     0.30   3/3      54.2   3.4       2.86
+     1.0     0.28   3/3      86.5   5.6       2.64
+
+=== Robustness: randomized physics + pushes, 50 episodes at 0.4 m/s (final model) ===
+
+fall rate: 52%  mean speed: 0.34 m/s
+Video of episode 0: runs/juan_v6/eval.mp4
+
+=== Hardware loads (best checkpoint) ===
+policy: juan_v6/best_model, nominal physics, robot weight 17.1 N
+
+=== command 0.3 m/s: walked 0.31 m/s avg, falls 0/3 ===
+joint        peak Nm  99% Nm peak %stall time >80% peak rad/s
+left_hip_roll    1.19    0.93         35%      0.0%        4.6
+left_hip_pitch    1.91    1.27         56%      0.0%        5.3
+left_knee       1.74    1.27         51%      0.0%        6.2
+left_ankle      2.62    1.70         76%      0.0%        5.4
+right_hip_roll    1.92    1.05         56%      0.0%        5.3
+right_hip_pitch    1.51    1.04         44%      0.0%        4.6
+right_knee      1.61    0.84         47%      0.0%        5.7
+right_ankle     2.11    1.06         62%      0.0%        4.8
+foot landing force: typical (median) 18 N, 99th pct 29 N, max 31 N  (= 1.8x body weight)
+battery current (estimate): mean 2.7 A, peak 9.4 A
+
+=== command 0.5 m/s: walked 0.49 m/s avg, falls 0/3 ===
+joint        peak Nm  99% Nm peak %stall time >80% peak rad/s
+left_hip_roll    2.07    1.46         60%      0.0%        5.6
+left_hip_pitch    2.66    1.51         78%      0.0%        6.0
+left_knee       2.18    1.45         64%      0.0%        7.2
+left_ankle      2.88    1.84         84%      0.0%        5.6
+right_hip_roll    1.93    1.32         56%      0.0%        5.4
+right_hip_pitch    2.44    1.65         71%      0.0%        6.5
+right_knee      2.27    1.26         66%      0.0%        6.8
+right_ankle     3.20    1.96         93%      0.1%        6.5
+foot landing force: typical (median) 18 N, 99th pct 34 N, max 42 N  (= 2.5x body weight)
+battery current (estimate): mean 3.2 A, peak 10.3 A
+
+=== command 0.8 m/s: walked 0.26 m/s avg, falls 3/3 ===
+joint        peak Nm  99% Nm peak %stall time >80% peak rad/s
+left_hip_roll    1.56    1.49         46%      0.0%        2.9
+left_hip_pitch    1.97    1.54         58%      0.0%        6.0
+left_knee       2.79    2.23         81%      0.1%        6.7
+left_ankle      2.31    1.55         67%      0.0%        5.8
+right_hip_roll    1.94    1.41         56%      0.0%        2.7
+right_hip_pitch    1.99    1.39         58%      0.0%        4.7
+right_knee      2.38    2.18         69%      0.0%        5.0
+right_ankle     2.48    1.45         72%      0.0%        5.8
+foot landing force: typical (median) 18 N, 99th pct 47 N, max 53 N  (= 3.1x body weight)
+battery current (estimate): mean 3.7 A, peak 9.8 A
+

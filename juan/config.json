@@ -1,0 +1,8 @@
+{
+    "url": "https://cad.onshape.com/documents/90e521e6daed83291de4e60e/w/e0bdaddca01513119761baff/e/8f5c454c7cd7341c489659a1",
+    "output_format": "mujoco",
+    "ignore": {
+        "wire*": "all", "cable*": "all",
+        "*": "collision", "!*foot*": "collision", "!*pelvis*": "collision"
+    }
+}
