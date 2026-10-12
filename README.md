@@ -182,7 +182,7 @@ Old run configs load and evaluate exactly as trained: settings added later fall 
 | juan_v5–v6 | Juan | step-timing penalty | longer steps and less wear, but still uneven and veering left |
 | **v7** | Juan | steering commands, mirror-symmetric policy, realistic physics (2 kg, real delays, servo slack, IMU bias), staged training with a push curriculum, warm start from v3 | in progress. From scratch on Juan, the policy got stuck standing; the warm start walks from step 0 |
 
-Next experiments: a 2-second history encoder (the Cassie paper's dual-history architecture) as an A/B test against v7, and a from-scratch "easy first" recipe (stronger servos, no hardware stops, then tightening), so a policy can be retrained from zero after big CAD changes.
+Next experiments: a 2-second history encoder (the dual-history architecture of Li et al. [[2]](#references)) as an A/B test against v7; a servo model with separate driving and braking torque limits and load-dependent backlash, as on PhoneBot [[3]](#references), a biped of Juan's size; and a from-scratch recipe (a feet-air-time reward, more exploration, no hardware stops at first, as in [[1]](#references) and [[3]](#references)), so a policy can be retrained from zero after big CAD changes.
 
 ---
 
