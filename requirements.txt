@@ -1,8 +1,2 @@
-mujoco>=3.2
-gymnasium>=1.0
-stable-baselines3>=2.3
-torch
-tensorboard
-imageio
-imageio-ffmpeg
-moviepy<2  # TensorBoard videos (torch needs moviepy.editor)
+# Dependencies are listed in pyproject.toml; this installs the project (editable) with them.
+-e .

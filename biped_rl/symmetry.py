@@ -24,10 +24,10 @@ def joint_mirror(env):
     motion flips the angle, e.g. hip roll)."""
     perm = np.arange(env.nu)
     sign = np.ones(env.nu)
-    for l, r, s in zip(env._mirror_l, env._mirror_r, env._mirror_sign):
+    for l, r, s in zip(env.robot.mirror_l, env.robot.mirror_r, env.robot.mirror_sign):
         perm[l], perm[r] = r, l
         sign[l] = sign[r] = s
-    if len(env._mirror_l) * 2 != env.nu:
+    if len(env.robot.mirror_l) * 2 != env.nu:
         raise ValueError("every actuated joint needs a mirror partner in RobotConfig.mirror_pairs")
     return perm, sign
 
@@ -58,7 +58,7 @@ def mirror_maps(env):
         block([0, 1, 2], [-1, 1, -1])
         for _ in range(3 if cfg.robot.joint_feedback else 1):
             block(jp, js)
-    block([0, 1, 2], [1, -1, -1]) if env._omni else block([0], [1])
+    block([0, 1, 2], [1, -1, -1]) if env.omni else block([0], [1])
     block([0, 1], [-1, -1])
     block([0, 1], [-1, 1])
     assert len(perm) == env.actor_obs_dim, (len(perm), env.actor_obs_dim)
@@ -108,7 +108,7 @@ def check_robot_mirror(env, trials=20, seed=0):
     def part_coms(delta):
         d.qpos[:] = env.data.qpos
         d.qpos[0:7] = [0, 0, 0, 1, 0, 0, 0]  # torso at the origin, upright: positions are in its frame
-        d.qpos[env._qpos_idx] = env._home_joint + delta
+        d.qpos[env.robot.qpos_idx] = env.robot.home_joint + delta
         mujoco.mj_kinematics(m, d)
         return d.xipos.copy()
 

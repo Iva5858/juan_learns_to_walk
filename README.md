@@ -27,54 +27,63 @@ Specs, measurements to make and recommended hardware changes are in [reports/Jua
 ```bash
 # one-time setup (Python 3.11; uv: https://docs.astral.sh/uv/)
 uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -r requirements.txt
+uv pip install --python .venv/bin/python -e .   # the biped_rl package and its dependencies
 source .venv/bin/activate
 
 # train the current recipe (~65M steps, ~4-5 h on an 18-core Mac; Ctrl+C saves)
-SMOKE=1 ./train_v7.sh      # 15-minute check of the whole pipeline first
-./train_v7.sh
+SMOKE=1 ./scripts/train_v7.sh      # 15-minute check of the whole pipeline first
+./scripts/train_v7.sh
 
 # watch it
 tensorboard --logdir runs  # http://localhost:6006
 tail -f runs/juan_v7.log
 
 # evaluate a run
-python evaluate.py --run runs/juan_v7_4_pushes                  # nominal physics, writes eval.mp4
-python evaluate.py --run runs/juan_v7_4_pushes --robust -n 50   # randomized physics + pushes: fall rate
-mjpython evaluate.py --run runs/juan_v7_4_pushes --viewer       # live 3D viewer (macOS needs mjpython)
-mjpython play.py --run runs/juan_v7_4_pushes [--robust|--pushes] # drive it with the arrow keys, after the boot
+python scripts/evaluate.py --run runs/juan_v7_4_pushes                  # nominal physics, writes eval.mp4
+python scripts/evaluate.py --run runs/juan_v7_4_pushes --robust -n 50   # randomized physics + pushes: fall rate
+mjpython scripts/evaluate.py --run runs/juan_v7_4_pushes --viewer       # live 3D viewer (macOS needs mjpython)
+mjpython scripts/play.py --run runs/juan_v7_4_pushes [--robust|--pushes]  # drive it with the arrow keys, after the boot
                                                                 # sequence (straight legs -> crouch -> policy)
 ```
 
-The project should not live in an iCloud-synced folder: iCloud turns checkpoints and meshes into placeholders that hang training until they download.
+Run everything from the project folder. The project should not live in an iCloud-synced folder: iCloud turns checkpoints and meshes into placeholders that hang training until they download, and it hides the editable-install file in `.venv`, so `import biped_rl` stops working.
 
 ---
 
 ## How it works
 
+The code is organized like Berkeley Humanoid Lite [[1]](#references): a robot description, a task made of small term modules (commands, observations, rewards, terminations, events, curricula), a training package, and thin scripts. Its training recipe follows Li et al. [[2]](#references).
+
 ```
-Onshape CAD ──onshape-to-robot──▶ juan/robot.xml ──postprocess_onshape.py──▶ juan/rl_scene.xml
-                                                                                  │
-                     ┌──────────────── biped_rl/env.py: servo model, sensors, rewards, randomization
-                     ▼
-     train.py (PPO, asymmetric actor-critic, mirror-symmetric actor) ──▶ runs/<name>/final_model
-                                                                                  │
-                     evaluate.py, tools/ ◀───────────────────────────────────────┘ ──▶ real robot (to do)
+Onshape CAD ─onshape-to-robot─▶ juan/robot.xml ─scripts/model/postprocess_onshape.py─▶ juan/rl_scene.xml
+                                                                                            │
+biped_rl/robots/juan.py ───▶ biped_rl/tasks/locomotion/ ◀───────────────────────────────────┘
+(joints, servo numbers)      env.py       simulation loop, servo model
+                             mdp/         commands, observations, rewards, terminations,
+                                          events (randomization, pushes), curriculums
+                             env_cfg.py   every setting
+                                   │
+                                   ▼
+            scripts/train.py + biped_rl/training/ (PPO, stages, dashboard)
+                                   │
+                                   ▼
+                        runs/<name>/final_model ──▶ scripts/evaluate.py, play.py, analysis/
+                                                ──▶ the real robot (to do)
 ```
 
 ### The simulated robot
-- **Servo model, not ideal motors.** Each joint is driven like a hobby servo: a PD controller, a linear torque-speed curve (no torque left at no-load speed), command delay, gear slack, and a zero-calibration error. Settings in `RobotConfig` and `RandomizationConfig` ([config.py](biped_rl/config.py)).
+- **Servo model, not ideal motors.** Each joint is driven like a hobby servo: a PD controller, a linear torque-speed curve (no torque left at no-load speed), command delay, gear slack, and a zero-calibration error. The servo model is in [env.py](biped_rl/tasks/locomotion/env.py); its numbers in [robots/juan.py](biped_rl/robots/juan.py) and `RandomizationConfig` ([env_cfg.py](biped_rl/tasks/locomotion/env_cfg.py)).
 - **Actions** are servo target offsets from a crouched home pose (0.5 rad per unit), smoothed by a filter (`filtered = 0.5·action + 0.5·filtered`), at 50 Hz.
-- **The policy only sees what the robot can measure:** IMU gravity direction and gyro, servo angles and speeds, its own last actions (3 frames of history), the command, a gait clock, and its heading error. True velocity, foot contacts and friction go only to the critic (asymmetric actor-critic, [policy.py](biped_rl/policy.py)).
+- **The policy only sees what the robot can measure:** IMU gravity direction and gyro, servo angles and speeds, its own last actions (3 frames of history), the command, a gait clock, and its heading error. True velocity, foot contacts and friction go only to the critic (asymmetric actor-critic, [policy.py](biped_rl/policy.py); the layout is documented in [mdp/observations.py](biped_rl/tasks/locomotion/mdp/observations.py)).
 
 ### Commands
 The policy follows three commands, the same three a joystick will give: **forward speed** (−0.1 to 0.4 m/s, raised by a speed curriculum), **sideways speed** (±0.1 m/s) and **turn rate** (±0.6 rad/s), plus **stand still**. During training a new command is drawn every 2–8 s. Training on many tasks also makes the policy more robust: it learns more ways to move, and reuses them to recover (Li et al. 2024).
 
 ### Left-right symmetry
-Juan's model is symmetric (left and right part positions agree within 1 mm), so the policy is made symmetric **by construction**: it computes its action for the situation and for its mirror image and averages them ([symmetry.py](biped_rl/symmetry.py), [policy.py](biped_rl/policy.py)). It cannot favor a leg or drift to one side. Earlier versions tried to *reward* symmetry instead, and that bent the gait (see the history below). `train.py` checks the mirror map on the model before every new run.
+Juan's model is symmetric (left and right part positions agree within 1 mm), so the policy is made symmetric **by construction**: it computes its action for the situation and for its mirror image and averages them ([symmetry.py](biped_rl/symmetry.py), [policy.py](biped_rl/policy.py)). It cannot favor a leg or drift to one side. Earlier versions tried to *reward* symmetry instead, and that bent the gait (see the history below). Every new training run first checks the mirror map on the model.
 
 ### Reward
-`reward = (alive + tracking × task terms) × exp(−sum of penalties)`, with a one-off penalty on falling. Task terms only pay while the command is being followed, and penalties scale the reward down instead of making it negative. All weights are in `RewardWeights` ([config.py](biped_rl/config.py)).
+`reward = (alive + tracking × task terms) × exp(−sum of penalties)`, with a one-off penalty on falling. Task terms only pay while the command is being followed, and penalties scale the reward down instead of making it negative. Each term is a small function in [mdp/rewards.py](biped_rl/tasks/locomotion/mdp/rewards.py), named like its weight in `RewardWeights` ([env_cfg.py](biped_rl/tasks/locomotion/env_cfg.py)).
 
 | Goal | Terms | Why |
 |---|---|---|
@@ -91,24 +100,25 @@ Speed tracking uses a forgiving kernel while the policy learns to walk (creeping
 - **Delay:** 5–59 ms from sensing to the servos moving, and readings up to one step old. Reading 8 bus servos over USB likely takes 20–30 ms: measure it and narrow this range
 - **Body:** 1.65–2.25 kg, extra weight mostly in the torso; torso center of mass ±1.5 cm; rotor inertia, gearbox friction
 - **IMU:** a fixed tilt bias of up to ±2.5° and gyro offset of up to ±0.02 rad/s per episode, plus noise
+- **Start:** from stage 3 on, each episode starts from a perturbed crouch (joint angles 70–130% of home) with the body already moving, as in Berkeley Humanoid Lite [[1]](#references)
 - **World:** floor friction 0.5–1.2, slopes up to 3°, pushes (see below)
 
 ### Training recipe (v7)
-Following Li et al. 2024 (Cassie): learn the skill, then the variety of tasks, then robustness, with pushes last.
+Following Li et al. [[2]](#references) (Cassie): learn the skill, then the variety of tasks, then robustness, with pushes last.
 
 | Stage | Physics | Commands | Pushes | Steps |
 |---|---|---|---|---|
-| 0 warm start | | | | copies juan_v3's walk into the v7 network ([tools/warm_start.py](tools/warm_start.py)) |
+| 0 warm start | | | | copies juan_v3's walk into the v7 network ([scripts/warm_start.py](scripts/warm_start.py)) |
 | 1 `walk` | nominal | one forward speed per episode | none | skipped by default |
 | 2 `commands` | nominal | all, changing every 2–8 s | none | 15M |
 | 3 `physics` | randomized, the v7 realism phased in by the physics curriculum | all | none | 25M, extended by 10M (up to 3×) until full difficulty |
 | 4 `pushes` | randomized, **full difficulty** | all | per-direction curriculum | 25M |
 
-- **Why the warm start:** learning to walk from zero on Juan's model has so far ended with the policy standing still. Every Juan policy before v7 also inherited its walk, from a policy trained on a simpler placeholder biped. The v7 network has the same inputs as v3 plus the two new commands, so v3's weights copy over directly and the copy walks from the first step. `FROM=scratch ./train_v7.sh` runs all four stages from zero.
+- **Why the warm start:** learning to walk from zero on Juan's model has so far ended with the policy standing still. Every Juan policy before v7 also inherited its walk, from a policy trained on a simpler placeholder biped. The v7 network has the same inputs as v3 plus the two new commands, so v3's weights copy over directly and the copy walks from the first step. `FROM=scratch ./scripts/train_v7.sh` runs all four stages from zero.
 - **Physics curriculum:** switching the whole realistic robot on at once (v7's first stage-3 attempt) made it fall in 60–95% of episodes and degraded the walk it had. Instead, one difficulty level (0 → 1) scales the realism added in v7: extra delay, extra and torso mass, gear slack, servo zero error, IMU bias. Each training environment raises it by 0.05 once the robot stayed up in 80% of its last 20 episodes. Stage 3 is extended until the level reaches 1, and stage 4 always trains at full difficulty, so the final policy is trained on the full robot. Evaluation (and so `best_model`) always uses full difficulty.
 - **Between stages:** curriculum levels (top speed, difficulty, push strengths) carry over to the next run (`curriculum.json`), exploration noise is raised back to at least 0.1, and speed tracking stays forgiving until stage 4.
 - **Push curriculum:** 8 push directions relative to the robot, each with its own strength, starting at 0.05 m/s. A direction gets 0.02 m/s stronger once the robot stays up through 9 of 10 pushes from it, weaker otherwise, up to 0.4 m/s. The policy trains at the edge of what it can take from each side.
-- Each stage is its own run (`runs/juan_v7_<n>_<stage>`) that resumes the previous one; `./train_v7.sh physics` restarts from a later stage. In stage 4, evaluation keeps the fixed standard test (random shoves up to 0.3 m/s per axis), so results compare with older runs.
+- Each stage is its own run (`runs/juan_v7_<n>_<stage>`) that resumes the previous one; `./scripts/train_v7.sh physics` restarts from a later stage. In stage 4, evaluation keeps the fixed standard test (random shoves up to 0.3 m/s per axis), so results compare with older runs.
 
 ---
 
@@ -122,7 +132,7 @@ Charts are grouped and numbered in reading order:
 | `2_commands` | Does it do what it's told? | forward, sideways and turn-rate errors, heading error and path drift shrinking |
 | `3_hardware` | Is it gentle on the servos? | torque and joint speed well under 1 (× stall, × servo max), landing force under 2 × body weight |
 | `4_gait` | What does the walk look like? | double support well below ~90% (near 100% = standing still) |
-| `5_rewards`, `6_penalties` | Why? | grouped sums; `train.py --log-details` adds every single penalty |
+| `5_rewards`, `6_penalties` | Why? | grouped sums; `scripts/train.py --log-details` adds every single penalty |
 
 Walking clips land in `runs/<name>/videos/` every 1M steps, named with the distance walked in 8 s at the top speed command (0.4 m/s → ~3 m).
 
@@ -132,13 +142,13 @@ Walking clips land in `runs/<name>/videos/` every 1M steps, named with the dista
 
 | Tool | What it tells you |
 |---|---|
-| `evaluate.py --run R [--robust -n 50] [--sweep]` | speed, flight/double support, impacts, saturation, smoothness, drift; fall rate under randomization; top speed |
-| `tools/fall_breakdown.py R full\|nopush\|pushonly` + `tools/summarize_falls.py` | falls vs hardware-limit stops, and the push direction before each failure (same seeds in every mode) |
-| `tools/joint_breakdown.py R full` | which joint trips the speed limit, when in the stride, and whether the robot would have walked on |
-| `tools/gait_symmetry.py R`, `tools/step_rhythm.py R` | left vs right step timing, length, foot lift, posture |
-| `tools/wear.py R1 R2 ...` | servo reversals, footsteps and joint range per meter: compare wear between runs |
-| `tools/hardware_loads.py R` | per-joint torque and speed, foot impacts, estimated battery current |
-| `tools/push_video.py R` | videos of the robot being shoved, including falls |
+| `scripts/evaluate.py --run R [--robust -n 50] [--sweep]` | speed, flight/double support, impacts, saturation, smoothness, drift; fall rate under randomization; top speed |
+| `scripts/analysis/fall_breakdown.py R full\|nopush\|pushonly` + `scripts/analysis/summarize_falls.py` | falls vs hardware-limit stops, and the push direction before each failure (same seeds in every mode) |
+| `scripts/analysis/joint_breakdown.py R full` | which joint trips the speed limit, when in the stride, and whether the robot would have walked on |
+| `scripts/analysis/gait_symmetry.py R`, `scripts/analysis/step_rhythm.py R` | left vs right step timing, length, foot lift, posture |
+| `scripts/analysis/wear.py R1 R2 ...` | servo reversals, footsteps and joint range per meter: compare wear between runs |
+| `scripts/analysis/hardware_loads.py R` | per-joint torque and speed, foot impacts, estimated battery current |
+| `scripts/analysis/push_video.py R` | videos of the robot being shoved, including falls |
 
 ---
 
@@ -146,13 +156,12 @@ Walking clips land in `runs/<name>/videos/` every 1M steps, named with the dista
 
 | Path | What |
 |---|---|
-| [biped_rl/config.py](biped_rl/config.py) | **Every setting**: robot, servos, commands, reward weights, randomization. `LEGACY` lists the values that make older run configs behave exactly as trained |
-| [biped_rl/env.py](biped_rl/env.py) | The Gymnasium environment: servo model, sensors, commands, rewards, falls, pushes |
-| [biped_rl/policy.py](biped_rl/policy.py), [biped_rl/symmetry.py](biped_rl/symmetry.py) | Asymmetric actor-critic; mirror maps, the model check and symmetric normalization |
-| [train.py](train.py), [train_v7.sh](train_v7.sh) | Training (stages, dashboard, videos, checkpoints); the v7 recipe |
-| [evaluate.py](evaluate.py), [tools/](tools/) | Evaluation and diagnostics (table above); `tools/warm_start.py` |
+| [biped_rl/robots/](biped_rl/robots/) | Robot descriptions: [juan.py](biped_rl/robots/juan.py) (model, feet, joint conventions, mirror pairs, servo numbers), and model paths that survive moving the project |
+| [biped_rl/tasks/locomotion/](biped_rl/tasks/locomotion/) | The walking task: [env.py](biped_rl/tasks/locomotion/env.py) (simulation loop, servo model), [env_cfg.py](biped_rl/tasks/locomotion/env_cfg.py) (**every setting**; `LEGACY` makes older run configs behave exactly as trained), and [mdp/](biped_rl/tasks/locomotion/mdp/): one module per kind of term (commands, observations, rewards, terminations, events, curriculums) |
+| [biped_rl/training/](biped_rl/training/) | [ppo.py](biped_rl/training/ppo.py) (PPO hyperparameters, a fresh model), [stages.py](biped_rl/training/stages.py) (training stages, curriculum carry-over), [callbacks.py](biped_rl/training/callbacks.py) (TensorBoard dashboard, clips) |
+| [biped_rl/policy.py](biped_rl/policy.py), [symmetry.py](biped_rl/symmetry.py), [motions.py](biped_rl/motions.py) | Asymmetric actor-critic; mirror maps, the model check and symmetric normalization; the boot sequence |
+| [scripts/](scripts/) | Entry points: `train.py`, `train_v7.sh` (the v7 recipe), `evaluate.py`, `play.py` (keyboard driving), `warm_start.py`; [analysis/](scripts/analysis/) (the tools above); [model/](scripts/model/) (`postprocess_onshape.py`: CAD export → RL model, `inspect_model.py`: mass/limits check and stand test, `cad_to_mjcf.py`: URDF route) |
 | [juan/](juan/) | Juan's model from Onshape (`robot.xml`) and the RL-ready version (`rl_robot.xml`, `rl_scene.xml`) |
-| [scripts/](scripts/) | `postprocess_onshape.py` (CAD export → RL model), `inspect_model.py` (mass/limits check + stand test), `cad_to_mjcf.py` (URDF route) |
 | [models/simple_biped.xml](models/simple_biped.xml) | The placeholder biped used before Juan's CAD existed |
 | [reports/](reports/), [research_notes/](research_notes/) | Research: fall recovery best practices; Juan's electronics |
 | `runs/` | Training outputs (not in git, except each run's `config.json` and `report.txt`) |
@@ -185,7 +194,7 @@ Deployment code is not written yet. This section specifies what it must match.
 
 | Item | Why it matters | Reference |
 |---|---|---|
-| Servo direction and zero offset, per joint | Mirrored servo mounting can reverse a joint on one side; the policy assumes the simulation's sign conventions (below) | `scripts/postprocess_onshape.py` |
+| Servo direction and zero offset, per joint | Mirrored servo mounting can reverse a joint on one side; the policy assumes the simulation's sign conventions (below) | `scripts/model/postprocess_onshape.py` |
 | Control-loop delay (read 8 servos + write 8 targets) | Training randomizes 5–59 ms; the measured value narrows `latency` and `action_delay_steps` | `RandomizationConfig` |
 | Servo voltage-limit register | A 12.0 V limit would unload the servos on a full 12.6 V pack | electronics report |
 | Part masses | Training assumes 1.65–2.25 kg | `RandomizationConfig`, BoM in `postprocess_onshape.py` |
@@ -201,7 +210,7 @@ Joint sign conventions (torso frame: x forward, y left, z up):
 
 ### Control loop (50 Hz)
 
-1. **Observation:** built exactly as `_read_sensors()`, `_history_frames()` and `_get_obs()` in [env.py](biped_rl/env.py): 3 history frames of [gravity in torso frame, gyro, joint angles − home, 0.1 × joint speeds, previous action], then the command (forward, sideways, turn rate), the gait clock and the heading error. The privileged part is zero-filled.
+1. **Observation:** built exactly as `read_sensors()`, `history_frames()` and `compute()` in [mdp/observations.py](biped_rl/tasks/locomotion/mdp/observations.py): 3 history frames of [gravity in torso frame, gyro, joint angles − home, 0.1 × joint speeds, previous action], then the command (forward, sideways, turn rate), the gait clock and the heading error. The privileged part is zero-filled.
 2. **Normalization:** the run's `vecnormalize.pkl` statistics, clipped to ±10.
 3. **Policy:** the full forward pass of `AsymmetricActorCritic`, including the mirror averaging (export the whole pass, e.g. to ONNX, not a single network). The action is clipped to [−1, 1].
 4. **Servo targets:** `filtered = 0.5·action + 0.5·filtered`, then `target = home + 0.5·filtered`, clipped to the joint limits, then mapped through the per-servo sign and zero offset.
@@ -216,15 +225,15 @@ Independent of the policy: a tilt watchdog that unloads or freezes the servos on
 
 1. In Onshape: mate connectors named `dof_<joint>` on each servo axis; wires can stay in the CAD (they are ignored in the export).
 2. API keys from https://dev-portal.onshape.com/keys go in `.env` (never commit it). `juan/config.json` holds the export settings.
-3. `onshape-to-robot juan`, then `python scripts/postprocess_onshape.py juan`. It writes `juan/rl_robot.xml` and `juan/rl_scene.xml`: part masses from the BoM (not Onshape's materials), the training's joint sign conventions (hip pitch and ankle negative = leg forward / toes up, knee positive = bends back), hip roll limits, box feet with rubber pads, leg capsules, the IMU site and the home pose. Update the BoM masses in that script when parts change.
-4. `python scripts/inspect_model.py juan/rl_scene.xml --view`, and compare part masses with the real parts on a scale.
-5. Retrain: for small changes, warm start from the latest Juan policy (`FROM=runs/<latest> ./train_v7.sh`, or `train.py --resume`); for big ones, from scratch.
+3. `onshape-to-robot juan`, then `python scripts/model/postprocess_onshape.py juan`. It writes `juan/rl_robot.xml` and `juan/rl_scene.xml`: part masses from the BoM (not Onshape's materials), the training's joint sign conventions (hip pitch and ankle negative = leg forward / toes up, knee positive = bends back), hip roll limits, box feet with rubber pads, leg capsules, the IMU site and the home pose. Update the BoM masses in that script when parts change.
+4. `python scripts/model/inspect_model.py juan/rl_scene.xml --view`, and compare part masses with the real parts on a scale.
+5. Retrain: for small changes, warm start from the latest Juan policy (`FROM=runs/<latest> ./scripts/train_v7.sh`, or `scripts/train.py --resume`); for big ones, from scratch.
 
 ---
 
 ## Running (flight phase)
 
-Rewarding air time directly produces hopping in place. Instead, fine-tune a walking policy with a flight phase built into the gait clock: `train.py --resume <walk run> --swing-ratio 0.6 --max-speed 0.5` gives 80 ms of flight per step at a 0.8 s period. With 3.4 Nm, 5.8 rad/s servos and ~2 kg, real flight is near the servos' limit: watch saturation and landing force.
+Rewarding air time directly produces hopping in place. Instead, fine-tune a walking policy with a flight phase built into the gait clock: `scripts/train.py --resume <walk run> --swing-ratio 0.6 --max-speed 0.5` gives 80 ms of flight per step at a 0.8 s period. With 3.4 Nm, 5.8 rad/s servos and ~2 kg, real flight is near the servos' limit: watch saturation and landing force.
 
 ---
 
@@ -232,12 +241,21 @@ Rewarding air time directly produces hopping in place. Instead, fine-tune a walk
 
 | Symptom | Likely cause / fix |
 |---|---|
-| Stands still, never walks (double support → 100%, clips walk 0.00 m) | Standing is a local optimum. Warm start from a walking policy (`tools/warm_start.py`); from scratch, use the forgiving speed tracking and forward-only commands of stage `walk` |
+| Stands still, never walks (double support → 100%, clips walk 0.00 m) | Standing is a local optimum. Warm start from a walking policy (`scripts/warm_start.py`); from scratch, use the forgiving speed tracking and forward-only commands of stage `walk` |
 | Falls a lot under randomization but not on nominal physics | Train longer; or phase in the hardest settings (delay, torso mass, push strength) |
-| Many "hardware limit" stops | Check `tools/joint_breakdown.py`: which joint, and whether it is a real overload |
+| Many "hardware limit" stops | Check `scripts/analysis/joint_breakdown.py`: which joint, and whether it is a real overload |
 | Jittery | Raise `action_rate`/`action_acc`, lower `action_filter` (e.g. 0.3) |
 | Shuffles feet | Raise `feet_clearance` and `gait_contact` |
 | `mirror check` fails before training | A sign in `RobotConfig.mirror_pairs` is wrong, or the model is no longer symmetric |
 | Training or loading hangs with no CPU use | Files are iCloud placeholders: download them (Finder → Download Now) or move the project out of iCloud |
 | Model explodes | Zero or tiny masses/inertias, or overlapping collision shapes |
 | `launch_passive` error on macOS | Use `mjpython` instead of `python` |
+| `ModuleNotFoundError: biped_rl` | Install the project (`uv pip install --python .venv/bin/python -e .`). In an iCloud folder macOS hides the install file and Python skips it: move the project out of iCloud (or, as a stopgap, `export PYTHONPATH=$PWD`) |
+
+---
+
+## References
+
+1. Y. Chi, Q. Liao, J. Long, X. Huang, S. Shao, B. Nikolic, Z. Li and K. Sreenath, "Demonstrating Berkeley Humanoid Lite: An Open-source, Accessible, and Customizable 3D-printed Humanoid Robot," arXiv:2504.17249, 2025. [Paper](https://arxiv.org/abs/2504.17249) · [Code](https://github.com/HybridRobotics/Berkeley-Humanoid-Lite) · [Website](https://lite.berkeley-humanoid.org/). The model for this project's code structure (robot description, task with term modules, training package, scripts) and for its varied starting states.
+2. Z. Li, X. B. Peng, P. Abbeel, S. Levine, G. Berseth and K. Sreenath, "Reinforcement learning for versatile, dynamic, and robust bipedal locomotion control," *The International Journal of Robotics Research*, vol. 44, no. 5, pp. 840–888, 2025. [arXiv:2401.16889](https://arxiv.org/abs/2401.16889). The staged training, the variety of commands as a source of robustness, and the planned 2-second-history encoder.
+3. R. Hou, Q. Wang, D. Koh and D. W. Hong, "PhoneBot: A Low-Cost Open Humanoid Robot Platform Reusing Smartphones," arXiv:2610.08737, 2026. [Paper](https://arxiv.org/abs/2610.08737) · [Website](https://phonebot.dev). A biped of Juan's size: the planned torque-aware servo model, load-dependent backlash and from-scratch recipe.

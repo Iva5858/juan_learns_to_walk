@@ -1,0 +1,268 @@
+"""Configuration of the locomotion task: commands, rewards, randomization, and the robot.
+
+Every tunable number lives here. A run saves its EnvConfig as runs/<name>/config.json;
+EnvConfig.from_dict loads it back, giving settings added after that run was saved their LEGACY
+value, so old runs evaluate exactly as they were trained.
+"""
+from dataclasses import asdict, dataclass, field
+
+from biped_rl.robots import juan
+
+__all__ = ["RobotConfig", "CommandConfig", "RewardWeights", "RandomizationConfig", "EnvConfig", "LEGACY"]
+
+
+@dataclass
+class RobotConfig:
+    """Which robot, and its servos. Defaults: Juan (biped_rl/robots/juan.py)."""
+    model_path: str = juan.MODEL_PATH   # relative to the project
+    foot_bodies: tuple = juan.FOOT_BODIES  # (left, right) body names in the MJCF
+    # Servo model (simulated in the env: PD + torque-speed curve), so the MJCF actuator type does
+    # not matter.
+    stall_torque: float = juan.STALL_TORQUE
+    no_load_speed: float = juan.NO_LOAD_SPEED
+    kp: float = juan.KP
+    kd: float = juan.KD
+    # The servos report their angle (not their speed: the robot differentiates). False for servos
+    # without feedback.
+    joint_feedback: bool = True
+    # Joints used by posture terms and the mirror map (names in the MJCF; missing names are skipped).
+    knee_joints: tuple = juan.KNEE_JOINTS
+    hip_roll_joints: tuple = juan.HIP_ROLL_JOINTS
+    mirror_pairs: tuple = juan.MIRROR_PAIRS
+
+
+@dataclass
+class CommandConfig:
+    # "omni": forward, sideways and turn-rate commands plus "stand", re-drawn every few seconds
+    # (task randomization: walking many ways is what lets a policy step out of trouble, and it
+    # is what joystick steering needs). "forward": one forward speed per episode, as in runs up
+    # to juan_v6; configs saved without this key load as "forward".
+    mode: str = "omni"
+    lateral_range: tuple = (-0.1, 0.1)   # sideways speed command [m/s], + = left
+    yaw_rate_range: tuple = (-0.6, 0.6)  # turn-rate command [rad/s], + = left (~35 deg/s)
+    backward_speed: float = 0.1          # forward commands are drawn from [-backward_speed, top]
+    stand_prob: float = 0.1              # share of commands that are "stand still, feet down"
+    straight_prob: float = 0.3           # share of walking commands with no sideways/turn part
+    resample_interval: tuple = (2.0, 8.0)  # s between new commands within an episode
+    # Forward speed command. The upper end grows automatically
+    # (speed curriculum) while the robot tracks its top commands without falling,
+    # up to speed_limit: the sim finds the real top speed instead of a guess.
+    speed_range: tuple = (0.0, 0.4)  # starting range [m/s]
+    speed_limit: float = 1.0         # curriculum ceiling [m/s]; the hardware gate decides how far below it to stay
+    curriculum_step: float = 0.05    # m/s per promotion / demotion
+    # Gait rhythm speeds up with the command: a fixed rhythm caps top speed at
+    # (max step length / step time).
+    gait_period: float = 0.8         # s per full left+right cycle when standing / slow
+    gait_period_fast: float = 0.45   # s per cycle at fast_speed and above
+    fast_speed: float = 0.8          # m/s
+    # Fraction of the cycle each foot is in the air. < 0.5: walking (double support),
+    # > 0.5: running (flight phase of (swing_ratio - 0.5) * period per step).
+    swing_ratio: float = 0.45
+    swing_height: float = 0.025      # target sole clearance during swing [m]
+
+
+@dataclass
+class RewardWeights:
+    """reward = (alive + tracking * sum(task terms)) * exp(-sum(penalties)) [+ termination]
+
+    * tracking = how well the speed command is met (1 = exact). Every task term is
+      multiplied by it, so heading, rhythm and foot lift only pay while actually
+      moving at the commanded speed: standing still at a 0.3 m/s command earns ~0.
+    * Penalties scale the reward down instead of being subtracted: the reward is never
+      negative (falling early never pays) and penalties still bite when things go badly.
+    """
+    # --- 1. straight-line speed (task terms, gated by tracking) ---
+    tracking_vel: float = 3.0        # the tracking factor itself, as a reward (juan_v3 weights from here)
+    # tracking = (1-share) * exp(-err^2 / sigma2) + share * exp(-err^2 / broad_sigma2), err in m/s.
+    # The broad part rewards creeping over standing (needed to learn to walk at all); once it walks,
+    # a forgiving kernel lets it trade speed away for small penalty savings, so sharpen it.
+    tracking_sigma2: float = 0.008
+    tracking_broad_sigma2: float = 0.08
+    tracking_broad_share: float = 0.15
+    tracking_lat_yaw: float = 0.5    # no sideways drift, no turning
+    heading: float = 1.0             # keep facing the start direction
+    # --- 4. gait shape (task terms, gated by tracking) ---
+    gait_contact: float = 1.0        # feet on the ground when the gait clock says stance
+    feet_clearance: float = 0.3      # swing sole reaches swing_height (no shuffling / toe drag)
+    flight: float = 0.0              # bonus when both feet are off the ground while moving
+    # --- 2. don't fall ---
+    alive: float = 0.2               # small: survival alone must not be worth standing still for
+    termination: float = -10.0       # one-off penalty on falling
+    # --- penalties (positive numbers; summed, then reward *= exp(-sum)) ---
+    path_offset: float = 2.0         # distance^2 from the straight start line [m^2] (0.02 at 10 cm)
+    stand_still: float = 1.0         # moving < 50% of a walking command (0 at half speed, 1 when stopped)
+    symmetry: float = 3.0            # left leg now vs right leg half a stride ago (mirrored) [rad^2]
+                                     # (juan_v3's value; the mirror-symmetric policy, EnvConfig.
+                                     # mirror_symmetry, does the heavy lifting now)
+    step_timing: float = 0.0         # every step: latest |left->right - right->left interval| / their sum.
+                                     # Off: replaced by the mirror-symmetric policy (v5/v6 used 3 / 1.5
+                                     # and stayed uneven)
+    posture_symmetry: float = 0.0    # left vs right leg AVERAGE angle over the last stride (mirrored)
+                                     # [rad^2]. Off: replaced by the mirror-symmetric policy (v4 used 15
+                                     # and skipped)
+    # --- wear per cycle (penalties count events, so many small gentle motions are not free) ---
+    gait_mismatch: float = 0.5       # fraction of feet on/off the ground against the gait clock
+    footstep: float = 1.0            # per touchdown: fewer, rhythm-paced steps = fewer impact cycles
+    reversals: float = 0.1           # per servo direction reversal (gear backlash hammering, pot wear)
+    orientation: float = 2.0         # torso tilt (roll/pitch)
+    ang_vel_xy: float = 0.05         # torso wobble
+    lin_vel_z: float = 0.5           # torso bouncing
+    base_height: float = 50.0        # pelvis below its home height [m^2] (no crouch-walking)
+    knee_hyperextension: float = 2.0 # knee bent backwards [rad] (no bird-legged gait)
+    hip_roll: float = 1.0            # hip roll away from 0 [rad^2] (no splayed, waddling legs)
+    hip_roll_inward: float = 5.0     # per rad of inward roll: 0 deg inward is the goal, the 5 deg
+                                     # joint limit is only a margin (5 deg inward costs ~0.44)
+    # --- 3. smooth, hardware-safe motion (penalties) ---
+    action_rate: float = 0.5         # 1st difference of actions
+    action_acc: float = 0.2          # 2nd difference of actions (jerk)
+    joint_acc: float = 1e-6          # joint accelerations [rad/s^2]
+    servo_load: float = 0.5          # (tau / stall)^2: heat and gear wear
+    servo_saturation: float = 1.0    # time spent on the torque-speed limit
+    servo_overload: float = 30.0     # torque above 80% of stall, ((|tau| - 0.8 stall) / stall)^2 per joint
+    backdrive: float = 5.0           # joint forced faster than the servo's no-load speed (impacts
+                                     # spinning the gearbox backwards: how hobby-servo gears break)
+    impact: float = 3.0              # foot landing force above impact_threshold * weight
+    foot_slip: float = 2.0           # sole sliding while on / within 1 cm of the floor
+    joint_limits: float = 5.0        # approaching the mechanical end stops
+    feet_distance: float = 5.0       # feet too close (legs colliding)
+    energy: float = 0.01             # mechanical power [W]
+
+    impact_threshold: float = 1.5    # x body weight
+
+    # --- hardware limits: crossing one ends the episode like a fall (the robot "broke") ---
+    break_impact: float = 3.0        # foot landing above this x body weight
+    break_joint_speed: float = 1.3   # joint forced above this x servo no-load speed (gearbox back-driven)
+    break_requires_load: float = 0.5  # ...while the servo pushes back with more than this x stall torque.
+                                      # A limb coasting fast with the servo barely engaged is not what
+                                      # strips gears (juan_v3: 13 of 17 such stops walked on fine).
+                                      # 0 = any over-speed counts (runs up to juan_v6)
+    # The speed curriculum only promotes after an episode that stayed inside all of these:
+    safe_torque: float = 0.8         # x stall torque
+    safe_joint_speed: float = 1.0    # x no-load speed
+    safe_impact: float = 2.0         # x body weight
+    min_feet_distance: float = 0.08  # m, lateral, in torso frame (nominal 0.118; feet touch at 0.05)
+
+
+@dataclass
+class RandomizationConfig:
+    enabled: bool = True
+    friction: tuple = (0.5, 1.2)            # rubber soles: ~0.6-1.0 indoors, lower bound for dusty/polished floors
+    # Mass: each part x mass_scale, then the whole robot x total_mass_scale, then the torso (battery,
+    # Pi, wiring: the hard case for balance is a heavy, high torso) x torso_mass_scale. Juan's model
+    # is 1.75 kg; this spans ~1.7-2.25 kg, centred near 2 kg (PLA prints and wiring come out heavy).
+    mass_scale: tuple = (0.9, 1.1)          # per part (and inertia)
+    total_mass_scale: tuple = (1.0, 1.15)   # whole robot
+    torso_mass_scale: tuple = (1.0, 1.25)   # torso only
+    com_offset: float = 0.015               # torso CoM shift, m
+    # Servo torque and speed scale with voltage, rated at 11.1 V: 3S LiPo full 12.6 V (x1.13)
+    # to near-empty ~10.5 V (x0.95), lower bound extra for servo variance and heat.
+    servo_strength: tuple = (0.85, 1.13)
+    servo_speed: tuple = (0.85, 1.13)
+    voltage_coupled: bool = True            # one battery-voltage draw scales torque AND speed together
+                                            # (servo_strength range; +-5% per servo on top). False: separate
+    kp_scale: tuple = (0.7, 1.3)
+    kd_scale: tuple = (0.7, 1.3)
+    armature_scale: tuple = (0.5, 1.5)
+    frictionloss_scale: tuple = (0.5, 2.0)
+    latency: tuple = (0.005, 0.019)         # s, within one control step, before the new target applies
+    # Whole control steps of delay on top (20 ms each): reading 8 bus servos through the USB adapter
+    # likely takes 20-30 ms, so the real loop may lag a step or two. Total action delay: 5-59 ms.
+    action_delay_steps: tuple = (0, 2)      # new servo targets take effect this many steps late
+    obs_delay_steps: tuple = (0, 1)         # IMU and joint readings are this many steps old
+    # Servo imperfections
+    backlash: tuple = (0.0, 0.017)          # rad (0-1 deg) of gear slack per joint: no restoring torque inside it
+    joint_resolution: float = 0.0042        # rad: HTD-35H reports 0-1000 counts over 240 deg (0.24 deg)
+    joint_offset: float = 0.03              # rad: per-servo zero calibration error (+-1.7 deg)
+    # IMU (BNO055) errors that stay the same through an episode: tilt bias from accelerometer offset and
+    # mounting, and gyro zero-rate offset. They matter more than its (small) white noise.
+    imu_tilt_bias_deg: float = 2.5          # +- per axis (roll, pitch) of the gravity reading
+    gyro_bias: float = 0.02                 # rad/s +- per axis
+    floor_tilt_deg: float = 3.0             # simulated slope via tilted gravity
+    push_interval: tuple = (2.0, 4.0)       # s between random shoves
+    push_velocity: float = 0.4              # m/s added to the torso: the cap (push_curriculum) or, without
+                                            # the curriculum, the range per axis (runs up to juan_v6: 0.3)
+    # Push curriculum (Kumar's "region of attraction"): 8 push directions relative to the robot, each
+    # with its own strength. A direction gets push_step stronger once the robot stays up through
+    # push_success of push_window pushes from it (no fall within 2 s), weaker otherwise; each push
+    # is 0.75-1.1x its direction's strength. The policy trains at the edge of what it can take, per
+    # direction (sideways is harder for a biped), without big early pushes teaching mostly falling.
+    push_curriculum: bool = True
+    push_start: float = 0.05                # m/s, every direction's first strength
+    push_step: float = 0.02                 # m/s
+    push_window: int = 10
+    push_success: float = 0.9
+    # Physics curriculum: the realism added in v7 (extra delay steps, extra robot and torso mass, gear
+    # slack, servo zero error, IMU tilt and gyro bias) is scaled by a difficulty level from 0 (none of
+    # it: roughly what juan_v3 trained on) to 1 (the full ranges above). Each training env raises its
+    # level by difficulty_step once the robot stayed up in difficulty_success of the last
+    # difficulty_window episodes, and lowers it otherwise. Switching everything on at once made
+    # juan_v7 fall in 60-95% of episodes and degraded the walk it already had.
+    physics_curriculum: bool = True
+    # Varied starting states (as in Berkeley Humanoid Lite): each episode starts from a perturbed
+    # crouch and with the body already moving, so recovering from odd states is practised from the
+    # first step, not only after pushes. Joint angles = home x a per-joint scale (hip roll's home is
+    # 0, so it keeps the small additive noise only); velocities are added to the torso.
+    reset_joint_scale: tuple = (0.7, 1.3)
+    reset_lin_vel: float = 0.2              # m/s, +- per horizontal axis
+    reset_ang_vel: float = 0.5              # rad/s, +- per axis
+    difficulty_start: float = 0.0
+    difficulty_step: float = 0.05
+    difficulty_window: int = 20
+    difficulty_success: float = 0.8
+    noise_gravity: float = 0.03
+    noise_gyro: float = 0.1                 # rad/s
+    noise_yaw: float = 0.03                 # rad, IMU heading
+    noise_joint_pos: float = 0.01           # rad
+    noise_joint_vel: float = 0.5            # rad/s
+
+
+# Values for settings missing from older run configs, so those runs load and behave as trained.
+LEGACY = {
+    "mirror_symmetry": False,
+    # The early runs on the placeholder biped (models/simple_biped.xml, joints l_*/r_*) relied on
+    # defaults that listed both robots' joint names.
+    "robot": {"knee_joints": ("l_knee", "r_knee", "left_knee", "right_knee"),
+              "hip_roll_joints": ("l_hip_roll", "r_hip_roll", "left_hip_roll", "right_hip_roll"),
+              "mirror_pairs": (("l_hip_roll", "r_hip_roll", -1), ("l_hip_pitch", "r_hip_pitch", 1),
+                               ("l_knee", "r_knee", 1), ("l_ankle", "r_ankle", 1)) + juan.MIRROR_PAIRS},
+    "command": {"mode": "forward"},
+    "rewards": {"break_requires_load": 0.0},
+    "randomization": {"total_mass_scale": (1.0, 1.0), "torso_mass_scale": (1.0, 1.0), "voltage_coupled": False,
+                      "action_delay_steps": (0, 0), "obs_delay_steps": (0, 0), "backlash": (0.0, 0.0),
+                      "joint_resolution": 0.0, "joint_offset": 0.0, "imu_tilt_bias_deg": 0.0, "gyro_bias": 0.0,
+                      "push_curriculum": False, "physics_curriculum": False,
+                      "reset_joint_scale": (1.0, 1.0), "reset_lin_vel": 0.0, "reset_ang_vel": 0.0},
+}
+
+
+@dataclass
+class EnvConfig:
+    robot: RobotConfig = field(default_factory=RobotConfig)
+    command: CommandConfig = field(default_factory=CommandConfig)
+    rewards: RewardWeights = field(default_factory=RewardWeights)
+    randomization: RandomizationConfig = field(default_factory=RandomizationConfig)
+    control_hz: float = 50.0     # same as standard servo PWM rate
+    action_scale: float = 0.5    # rad of servo target offset from the home pose per unit action
+    action_filter: float = 0.5   # EMA on actions (1 = off). Use the same filter on the robot!
+    history: int = 3             # past sensor frames stacked into the observation
+    episode_seconds: float = 20.0
+    # Left-right symmetric policy by construction (policy.py, symmetry.py). Configs saved without
+    # this key (runs up to juan_v6) load with it off.
+    mirror_symmetry: bool = True
+
+    def to_dict(self):
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d):
+        nested = {"robot": RobotConfig, "command": CommandConfig,
+                  "rewards": RewardWeights, "randomization": RandomizationConfig}
+
+        def build(sub_cls, values):  # JSON turns tuples into lists
+            return sub_cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in values.items()})
+
+        # Settings added after a run was saved get the value that reproduces that run's behaviour.
+        d = {**{k: v for k, v in LEGACY.items() if k not in nested}, **d}
+        d.update({k: {**LEGACY.get(k, {}), **d.get(k, {})} for k in nested})
+
+        return cls(**{k: build(nested[k], v) if k in nested else v for k, v in d.items()})
