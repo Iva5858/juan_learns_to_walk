@@ -78,6 +78,7 @@ class TrainingDashboard(BaseCallback):
             self._add("1_overview/top_speed_command_mps", info["speed_max"])
             self._add("1_overview/push_strength_mps_avg_direction", info["push_level_mean"])
             self._add("1_overview/push_strength_mps_weakest_direction", info["push_level_min"])
+            self._add("1_overview/physics_difficulty", info["physics_difficulty"])
             self._add("3_hardware/peak_torque_x_stall", info["peak_torque_stall"])
             self._add("3_hardware/peak_joint_speed_x_servo_max", info["max_joint_speed_ratio"])
             self._add("3_hardware/landing_force_x_body_weight", info["peak_force_bw"])
@@ -225,15 +226,16 @@ def apply_stage(cfg, stage):
                 speed tracking
       commands  nominal physics, no pushes; all commands (backward, stand, sideways, turning, changed
                 every few seconds); forgiving speed tracking
-      physics   randomized physics (mass, delays, servos, IMU...), no pushes
-      pushes    randomized physics + the per-direction push curriculum
+      physics   randomized physics, with the v7 realism (delays, heavy torso, slack, IMU bias...)
+                phased in by the physics curriculum; no pushes; forgiving speed tracking
+      pushes    randomized physics at full difficulty + the per-direction push curriculum
     Each stage is a separate run that --resume's the previous one (see train_v7.sh)."""
     rnd, cmd, w = cfg.randomization, cfg.command, cfg.rewards
     rnd.enabled = stage in ("physics", "pushes")
     # Speed-tracking kernel: forgiving while learning to walk (creeping must beat standing, or the
     # policy settles for standing still), then sharp (juan_v3's) once it walks, so it can't trade
     # speed away for small penalty savings.
-    learning = stage in ("walk", "commands")
+    learning = stage in ("walk", "commands", "physics")
     w.tracking_vel = 2.0 if learning else RewardWeights().tracking_vel
     w.tracking_sigma2 = 0.02 if learning else RewardWeights().tracking_sigma2
     w.tracking_broad_share = 0.5 if learning else RewardWeights().tracking_broad_share
@@ -248,6 +250,24 @@ def apply_stage(cfg, stage):
     cmd.resample_interval = (1e9, 1e9) if walk else default.resample_interval
     rnd.push_velocity = RandomizationConfig().push_velocity if stage == "pushes" else 0.0
     rnd.push_curriculum = stage == "pushes"
+    rnd.physics_curriculum = stage == "physics"  # stage 4 trains on the full-difficulty robot
+
+
+# Curriculum levels live in the env processes and would start over with every new run; they are
+# saved at the end of a run and restored when another run resumes from it. (Through env methods:
+# VecEnv.set_attr only reaches the Monitor wrapper, not the environment inside it.)
+def save_curriculum(env, run_dir):
+    states = env.env_method("curriculum_state")
+    state = {k: np.mean([st[k] for st in states], axis=0).tolist() for k in states[0]}
+    (run_dir / "curriculum.json").write_text(json.dumps(state, indent=2))
+
+
+def load_curriculum(env, run_dir):
+    path = run_dir / "curriculum.json"
+    if path.exists():
+        state = json.loads(path.read_text())
+        env.env_method("set_curriculum_state", state)
+        print(f"curriculum from {path}: {state}", flush=True)
 
 
 def main():
@@ -261,6 +281,9 @@ def main():
     p.add_argument("--swing-ratio", type=float, help=">0.5 gives a flight phase (running)")
     p.add_argument("--no-joint-feedback", action="store_true", help="servos cannot report their angle")
     p.add_argument("--resume", help="run directory to continue from (fine-tuning / curriculum)")
+    p.add_argument("--min-std", type=float, default=0.1,
+                   help="with --resume and --stage: raise the policy's exploration noise to at least this "
+                        "(it shrinks during training; a new stage needs room to try new movements)")
     p.add_argument("--stage", choices=STAGES, help="training stage (see apply_stage); with --resume for "
                    "all but the first")
     p.add_argument("--new-rewards", action="store_true",
@@ -312,6 +335,7 @@ def main():
     if eval_cfg.randomization.push_velocity > 0:
         eval_cfg.randomization.push_curriculum = False
         eval_cfg.randomization.push_velocity = 0.3
+    eval_cfg.randomization.physics_curriculum = False  # evaluation: the full-difficulty robot
     eval_env = DummyVecEnv([lambda: Monitor(BipedEnv(eval_cfg.to_dict()))])
 
     if args.resume:
@@ -320,6 +344,10 @@ def main():
         model = PPO.load(Path(args.resume) / "final_model", env=env, device="cpu",
                          tensorboard_log=str(run_dir), custom_objects=custom)
         print(f"resumed from {args.resume}, learning rate {model.learning_rate}", flush=True)
+        if args.stage:
+            with torch.no_grad():
+                model.policy.log_std.clamp_(min=float(np.log(args.min_std)))
+        load_curriculum(env, Path(args.resume))
     else:
         model, env = new_model(cfg, env, tensorboard_log=str(run_dir))
     eval_env = VecNormalize(eval_env, training=False, norm_reward=False)
@@ -340,6 +368,7 @@ def main():
         # Saved even on Ctrl+C, so you can stop early and evaluate.
         model.save(run_dir / "final_model")
         env.save(str(run_dir / "vecnormalize.pkl"))
+        save_curriculum(env, run_dir)
         # flush: stdout is often redirected to a log; after Ctrl+C the workers may hang on close
         print(f"Saved policy and normalization stats to {run_dir} (safe to Ctrl+C again)", flush=True)
         env.close()

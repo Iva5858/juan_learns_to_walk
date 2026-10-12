@@ -222,6 +222,17 @@ class RandomizationConfig:
     push_step: float = 0.02                 # m/s
     push_window: int = 10
     push_success: float = 0.9
+    # Physics curriculum: the realism added in v7 (extra delay steps, extra robot and torso mass, gear
+    # slack, servo zero error, IMU tilt and gyro bias) is scaled by a difficulty level from 0 (none of
+    # it: roughly what juan_v3 trained on) to 1 (the full ranges above). Each training env raises its
+    # level by difficulty_step once the robot stayed up in difficulty_success of the last
+    # difficulty_window episodes, and lowers it otherwise. Switching everything on at once made
+    # juan_v7 fall in 60-95% of episodes and degraded the walk it already had.
+    physics_curriculum: bool = True
+    difficulty_start: float = 0.0
+    difficulty_step: float = 0.05
+    difficulty_window: int = 20
+    difficulty_success: float = 0.8
     noise_gravity: float = 0.03
     noise_gyro: float = 0.1                 # rad/s
     noise_yaw: float = 0.03                 # rad, IMU heading
@@ -237,7 +248,7 @@ LEGACY = {
     "randomization": {"total_mass_scale": (1.0, 1.0), "torso_mass_scale": (1.0, 1.0), "voltage_coupled": False,
                       "action_delay_steps": (0, 0), "obs_delay_steps": (0, 0), "backlash": (0.0, 0.0),
                       "joint_resolution": 0.0, "joint_offset": 0.0, "imu_tilt_bias_deg": 0.0, "gyro_bias": 0.0,
-                      "push_curriculum": False},
+                      "push_curriculum": False, "physics_curriculum": False},
 }
 
 

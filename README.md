@@ -99,10 +99,12 @@ Following Li et al. 2024 (Cassie): learn the skill, then the variety of tasks, t
 | 0 warm start | | | | copies juan_v3's walk into the v7 network ([tools/warm_start.py](tools/warm_start.py)) |
 | 1 `walk` | nominal | one forward speed per episode | none | skipped by default |
 | 2 `commands` | nominal | all, changing every 2–8 s | none | 15M |
-| 3 `physics` | randomized | all | none | 25M |
-| 4 `pushes` | randomized | all | per-direction curriculum | 25M |
+| 3 `physics` | randomized, the v7 realism phased in by the physics curriculum | all | none | 25M, extended by 10M (up to 3×) until full difficulty |
+| 4 `pushes` | randomized, **full difficulty** | all | per-direction curriculum | 25M |
 
 - **Why the warm start:** learning to walk from zero on Juan's model has so far ended with the policy standing still. Every Juan policy before v7 also inherited its walk, from a policy trained on a simpler placeholder biped. The v7 network has the same inputs as v3 plus the two new commands, so v3's weights copy over directly and the copy walks from the first step. `FROM=scratch ./train_v7.sh` runs all four stages from zero.
+- **Physics curriculum:** switching the whole realistic robot on at once (v7's first stage-3 attempt) made it fall in 60–95% of episodes and degraded the walk it had. Instead, one difficulty level (0 → 1) scales the realism added in v7: extra delay, extra and torso mass, gear slack, servo zero error, IMU bias. Each training environment raises it by 0.05 once the robot stayed up in 80% of its last 20 episodes. Stage 3 is extended until the level reaches 1, and stage 4 always trains at full difficulty, so the final policy is trained on the full robot. Evaluation (and so `best_model`) always uses full difficulty.
+- **Between stages:** curriculum levels (top speed, difficulty, push strengths) carry over to the next run (`curriculum.json`), exploration noise is raised back to at least 0.1, and speed tracking stays forgiving until stage 4.
 - **Push curriculum:** 8 push directions relative to the robot, each with its own strength, starting at 0.05 m/s. A direction gets 0.02 m/s stronger once the robot stays up through 9 of 10 pushes from it, weaker otherwise, up to 0.4 m/s. The policy trains at the edge of what it can take from each side.
 - Each stage is its own run (`runs/juan_v7_<n>_<stage>`) that resumes the previous one; `./train_v7.sh physics` restarts from a later stage. In stage 4, evaluation keeps the fixed standard test (random shoves up to 0.3 m/s per axis), so results compare with older runs.
 

@@ -100,6 +100,10 @@ class BipedEnv(gym.Env):
         self._push_level = np.full(8, cfg.randomization.push_start)
         self._push_tally = np.zeros((8, 2))  # per direction: [stayed up, pushes]
         self._pending_push = None            # (direction, time) of a push whose outcome is not known yet
+        # Physics curriculum (see RandomizationConfig): kept across episodes, like the others.
+        rc = cfg.randomization
+        self._difficulty = rc.difficulty_start if rc.physics_curriculum else 1.0
+        self._episode_tally = np.zeros(2)    # [stayed up, episodes] since the last difficulty change
 
         self._omni = cfg.command.mode == "omni"
         frame_dim = 6 + (2 * self.nu if cfg.robot.joint_feedback else 0) + self.nu
@@ -206,26 +210,55 @@ class BipedEnv(gym.Env):
         self._latency_steps = min(lat, self.frame_skip - 1)
         # Below: drawn after everything above and only when switched on, so configs without these
         # settings (runs up to juan_v6) get exactly the same random draws as when they were trained.
+        # The v7 realism below is scaled by the physics-curriculum difficulty (1 = full ranges).
+        k = self._difficulty
+        upto = lambda rng_range: (rng_range[0], rng_range[0] + k * (rng_range[1] - rng_range[0]))
         if tuple(c.total_mass_scale) != (1.0, 1.0) or tuple(c.torso_mass_scale) != (1.0, 1.0):
-            extra = np.full(m.nbody, rng.uniform(*c.total_mass_scale))
-            extra[self._root] *= rng.uniform(*c.torso_mass_scale)
+            extra = np.full(m.nbody, rng.uniform(*upto(c.total_mass_scale)))
+            extra[self._root] *= rng.uniform(*upto(c.torso_mass_scale))
             m.body_mass[:] *= extra
             m.body_inertia[:] *= extra[:, None]
         if c.action_delay_steps[1] > 0:
-            self._act_delay = int(rng.integers(c.action_delay_steps[0], c.action_delay_steps[1] + 1))
+            lo, hi = upto(c.action_delay_steps)
+            self._act_delay = int(rng.integers(lo, int(round(hi)) + 1))
         if c.obs_delay_steps[1] > 0:
-            self._obs_delay = int(rng.integers(c.obs_delay_steps[0], c.obs_delay_steps[1] + 1))
+            lo, hi = upto(c.obs_delay_steps)
+            self._obs_delay = int(rng.integers(lo, int(round(hi)) + 1))
         if c.backlash[1] > 0:
-            self._backlash = rng.uniform(*c.backlash, size=nu)
+            self._backlash = rng.uniform(*upto(c.backlash), size=nu)
         if c.joint_offset > 0:
-            self._joint_off = rng.uniform(-c.joint_offset, c.joint_offset, nu)
+            self._joint_off = rng.uniform(-k * c.joint_offset, k * c.joint_offset, nu)
         if c.imu_tilt_bias_deg > 0:
-            roll, pitch = np.radians(rng.uniform(-c.imu_tilt_bias_deg, c.imu_tilt_bias_deg, 2))
+            bias = k * c.imu_tilt_bias_deg
+            roll, pitch = np.radians(rng.uniform(-bias, bias, 2))
             cr, sr, cp, sp = np.cos(roll), np.sin(roll), np.cos(pitch), np.sin(pitch)
             self._grav_bias = (np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
                                @ np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]]))
         if c.gyro_bias > 0:
-            self._gyro_bias = rng.uniform(-c.gyro_bias, c.gyro_bias, 3)
+            self._gyro_bias = rng.uniform(-k * c.gyro_bias, k * c.gyro_bias, 3)
+
+    def curriculum_state(self):
+        """Curriculum levels (top speed, physics difficulty, push strengths), to carry them over to the
+        next training run: they live in the env processes and would otherwise start over."""
+        return {"speed_max": float(self._speed_max), "difficulty": float(self._difficulty),
+                "push_level": self._push_level.tolist()}
+
+    def set_curriculum_state(self, state):
+        self._speed_max = float(state["speed_max"])
+        self._push_level = np.array(state["push_level"], dtype=float)
+        if self.cfg.randomization.physics_curriculum:  # otherwise the robot stays at full difficulty
+            self._difficulty = float(state["difficulty"])
+
+    def _score_episode(self, stayed_up):
+        """Physics curriculum: every difficulty_window episodes, harder if the robot stayed up in at
+        least difficulty_success of them, easier otherwise."""
+        rc = self.cfg.randomization
+        self._episode_tally += (float(stayed_up), 1.0)
+        if self._episode_tally[1] >= rc.difficulty_window:
+            ok = self._episode_tally[0] / self._episode_tally[1] >= rc.difficulty_success
+            self._difficulty = float(np.clip(self._difficulty + (rc.difficulty_step if ok else -rc.difficulty_step),
+                                             0.0, 1.0))
+            self._episode_tally[:] = 0.0
 
     # ------------------------------------------------------------------ sensing
     def _root_rot(self):
@@ -690,6 +723,8 @@ class BipedEnv(gym.Env):
         truncated = self._steps >= self._max_steps
         if terminated or truncated:
             self._update_speed_curriculum(fell=terminated)
+            if cfg.randomization.enabled and cfg.randomization.physics_curriculum and not self._cmd_fixed:
+                self._score_episode(stayed_up=not terminated)
 
         # Random shoves (robustness).
         rc = cfg.randomization
@@ -742,6 +777,7 @@ class BipedEnv(gym.Env):
             "base_height": self._com_height(),
             "recovering": float(recovering),
             "push_level_mean": float(self._push_level.mean()), "push_level_min": float(self._push_level.min()),
+            "physics_difficulty": self._difficulty,
         })
         return self._get_obs(), reward, terminated, truncated, info
 
