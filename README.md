@@ -42,6 +42,8 @@ tail -f runs/juan_v7.log
 python evaluate.py --run runs/juan_v7_4_pushes                  # nominal physics, writes eval.mp4
 python evaluate.py --run runs/juan_v7_4_pushes --robust -n 50   # randomized physics + pushes: fall rate
 mjpython evaluate.py --run runs/juan_v7_4_pushes --viewer       # live 3D viewer (macOS needs mjpython)
+mjpython play.py --run runs/juan_v7_4_pushes [--robust|--pushes] # drive it with the arrow keys, after the boot
+                                                                # sequence (straight legs -> crouch -> policy)
 ```
 
 The project should not live in an iCloud-synced folder: iCloud turns checkpoints and meshes into placeholders that hang training until they download.
