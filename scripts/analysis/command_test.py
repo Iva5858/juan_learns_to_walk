@@ -28,7 +28,10 @@ COMMANDS = [  # (label, forward m/s, sideways m/s, turn rad/s); None = stand
     ("walk 0.2 + turn left 0.6", 0.2, 0.0, 0.6),
     ("sideways left 0.1", 0.0, 0.1, 0.0),
     ("sideways right 0.1", 0.0, -0.1, 0.0),
+    ("sideways left 0.15", 0.0, 0.15, 0.0),
+    ("sideways right 0.15", 0.0, -0.15, 0.0),
     ("backward 0.1", -0.1, 0.0, 0.0),
+    ("backward 0.15", -0.15, 0.0, 0.0),
     ("stand", None, None, None),
 ]
 

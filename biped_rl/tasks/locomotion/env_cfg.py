@@ -38,13 +38,16 @@ class CommandConfig:
     # is what joystick steering needs). "forward": one forward speed per episode, as in runs up
     # to juan_v6; configs saved without this key load as "forward".
     mode: str = "omni"
-    lateral_range: tuple = (-0.1, 0.1)   # sideways speed command [m/s], + = left
+    lateral_range: tuple = (-0.15, 0.15)  # sideways speed command [m/s], + = left (runs up to juan_v7_7: 0.1)
     yaw_rate_range: tuple = (-0.6, 0.6)  # turn-rate command [rad/s], + = left (~35 deg/s)
-    backward_speed: float = 0.1          # forward commands are drawn from [-backward_speed, top]
+    backward_speed: float = 0.15         # forward commands are drawn from [-backward_speed, top] (up to juan_v7_7: 0.1)
     stand_prob: float = 0.1              # share of commands that are "stand still, feet down"
     straight_prob: float = 0.3           # share of walking commands with no sideways/turn part
     turn_in_place_prob: float = 0.2      # share of walking commands that only turn (forward = sideways = 0):
                                          # otherwise rare, and juan_v7_6 turned in place at 0.41 of 0.6 rad/s
+    backward_prob: float = 0.1           # share that only walks backward, at [0, backward_speed]: otherwise
+                                         # ~1 in 7 commands is backward, mostly near zero
+    sideways_prob: float = 0.1           # share that only walks sideways, within lateral_range
     resample_interval: tuple = (2.0, 8.0)  # s between new commands within an episode
     # Forward speed command. The upper end grows automatically
     # (speed curriculum) while the robot tracks its top commands without falling,
@@ -227,7 +230,7 @@ LEGACY = {
               "hip_roll_joints": ("l_hip_roll", "r_hip_roll", "left_hip_roll", "right_hip_roll"),
               "mirror_pairs": (("l_hip_roll", "r_hip_roll", -1), ("l_hip_pitch", "r_hip_pitch", 1),
                                ("l_knee", "r_knee", 1), ("l_ankle", "r_ankle", 1)) + juan.MIRROR_PAIRS},
-    "command": {"mode": "forward", "turn_in_place_prob": 0.0},
+    "command": {"mode": "forward", "turn_in_place_prob": 0.0, "backward_prob": 0.0, "sideways_prob": 0.0},
     "rewards": {"break_requires_load": 0.0},
     "randomization": {"total_mass_scale": (1.0, 1.0), "torso_mass_scale": (1.0, 1.0), "voltage_coupled": False,
                       "action_delay_steps": (0, 0), "obs_delay_steps": (0, 0), "backlash": (0.0, 0.0),

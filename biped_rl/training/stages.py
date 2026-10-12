@@ -35,6 +35,9 @@ def apply_stage(cfg, stage):
     walk = stage == "walk"
     cmd.straight_prob = 1.0 if walk else default.straight_prob
     cmd.turn_in_place_prob = 0.0 if walk else default.turn_in_place_prob
+    cmd.backward_prob = 0.0 if walk else default.backward_prob
+    cmd.sideways_prob = 0.0 if walk else default.sideways_prob
+    cmd.lateral_range = default.lateral_range
     cmd.stand_prob = 0.0 if walk else default.stand_prob
     cmd.backward_speed = 0.0 if walk else default.backward_speed
     cmd.resample_interval = (1e9, 1e9) if walk else default.resample_interval
