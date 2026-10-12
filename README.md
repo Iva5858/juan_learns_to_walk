@@ -173,18 +173,38 @@ Next experiments: a 2-second history encoder (the Cassie paper's dual-history ar
 
 ---
 
-## Going to the real robot
+## Deployment on the robot
 
-**Measure first** (details and methods in the electronics report):
-1. **Servo direction and zero, one at a time:** command each servo +10° from home and check that it moves the way the simulation's joint does (hip pitch +: leg swings back; knee +: shin swings back; ankle +: toe down; hip roll +: left leg out, right leg in). Mirrored mounting often reverses one side; the robot code needs a per-servo sign and zero offset.
-2. **The control loop's real delay:** time reading 8 servos plus writing 8 targets through the BusLinker. Narrow `latency` and `action_delay_steps` to the measured value and fine-tune.
-3. **The servos' voltage limit setting** (a 12.0 V limit would cut them out on a full 12.6 V pack), and the real weight of every part.
+Deployment code is not written yet. This section specifies what it must match.
 
-**Run the policy at 50 Hz on the Pi:**
-1. Build the actor observation exactly as `_read_sensors()`, `_history_frames()` and `_get_obs()` do (same order and scaling, 3 frames of [IMU, joint angles, joint speeds, last action], then command, gait clock, heading error). Fill the privileged part with zeros.
-2. Normalize with the run's `vecnormalize.pkl` statistics, run the network, clip the action to [−1, 1]. The mirror averaging is part of the policy's forward pass: export that whole pass (e.g. to ONNX), not just one network.
-3. Filter (`filtered = 0.5·action + 0.5·filtered`), send `servo_angle = home + 0.5·filtered`, clipped to the joint limits, through the per-servo sign and offset.
-4. Keep a safety layer outside the policy: a tilt watchdog that goes limp or freezes on an unavoidable fall, battery and temperature checks, and a kill switch. First runs on a harness.
+### Calibration before deployment
+
+| Item | Why it matters | Reference |
+|---|---|---|
+| Servo direction and zero offset, per joint | Mirrored servo mounting can reverse a joint on one side; the policy assumes the simulation's sign conventions (below) | `scripts/postprocess_onshape.py` |
+| Control-loop delay (read 8 servos + write 8 targets) | Training randomizes 5–59 ms; the measured value narrows `latency` and `action_delay_steps` | `RandomizationConfig` |
+| Servo voltage-limit register | A 12.0 V limit would unload the servos on a full 12.6 V pack | electronics report |
+| Part masses | Training assumes 1.65–2.25 kg | `RandomizationConfig`, BoM in `postprocess_onshape.py` |
+
+Joint sign conventions (torso frame: x forward, y left, z up):
+
+| Joint | Positive rotation |
+|---|---|
+| Hip roll | left leg outward, right leg inward |
+| Hip pitch | leg swings back |
+| Knee | shin swings back (knee bends) |
+| Ankle | toes down |
+
+### Control loop (50 Hz)
+
+1. **Observation:** built exactly as `_read_sensors()`, `_history_frames()` and `_get_obs()` in [env.py](biped_rl/env.py): 3 history frames of [gravity in torso frame, gyro, joint angles − home, 0.1 × joint speeds, previous action], then the command (forward, sideways, turn rate), the gait clock and the heading error. The privileged part is zero-filled.
+2. **Normalization:** the run's `vecnormalize.pkl` statistics, clipped to ±10.
+3. **Policy:** the full forward pass of `AsymmetricActorCritic`, including the mirror averaging (export the whole pass, e.g. to ONNX, not a single network). The action is clipped to [−1, 1].
+4. **Servo targets:** `filtered = 0.5·action + 0.5·filtered`, then `target = home + 0.5·filtered`, clipped to the joint limits, then mapped through the per-servo sign and zero offset.
+
+### Safety layer
+
+Independent of the policy: a tilt watchdog that unloads or freezes the servos on an unrecoverable fall, battery-voltage and servo-temperature monitoring, and a hardware kill switch. Initial tests run on a harness.
 
 ---
 
