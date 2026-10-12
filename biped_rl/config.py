@@ -229,6 +229,13 @@ class RandomizationConfig:
     # difficulty_window episodes, and lowers it otherwise. Switching everything on at once made
     # juan_v7 fall in 60-95% of episodes and degraded the walk it already had.
     physics_curriculum: bool = True
+    # Varied starting states (as in Berkeley Humanoid Lite): each episode starts from a perturbed
+    # crouch and with the body already moving, so recovering from odd states is practised from the
+    # first step, not only after pushes. Joint angles = home x a per-joint scale (hip roll's home is
+    # 0, so it keeps the small additive noise only); velocities are added to the torso.
+    reset_joint_scale: tuple = (0.7, 1.3)
+    reset_lin_vel: float = 0.2              # m/s, +- per horizontal axis
+    reset_ang_vel: float = 0.5              # rad/s, +- per axis
     difficulty_start: float = 0.0
     difficulty_step: float = 0.05
     difficulty_window: int = 20
@@ -248,7 +255,8 @@ LEGACY = {
     "randomization": {"total_mass_scale": (1.0, 1.0), "torso_mass_scale": (1.0, 1.0), "voltage_coupled": False,
                       "action_delay_steps": (0, 0), "obs_delay_steps": (0, 0), "backlash": (0.0, 0.0),
                       "joint_resolution": 0.0, "joint_offset": 0.0, "imu_tilt_bias_deg": 0.0, "gyro_bias": 0.0,
-                      "push_curriculum": False, "physics_curriculum": False},
+                      "push_curriculum": False, "physics_curriculum": False,
+                      "reset_joint_scale": (1.0, 1.0), "reset_lin_vel": 0.0, "reset_ang_vel": 0.0},
 }
 
 

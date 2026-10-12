@@ -251,6 +251,13 @@ def apply_stage(cfg, stage):
     rnd.push_velocity = RandomizationConfig().push_velocity if stage == "pushes" else 0.0
     rnd.push_curriculum = stage == "pushes"
     rnd.physics_curriculum = stage == "physics"  # stage 4 trains on the full-difficulty robot
+    # Varied starting states once physics is randomized (also switches them on when resuming a run
+    # saved before they existed).
+    default_rnd = RandomizationConfig()
+    varied = stage in ("physics", "pushes")
+    rnd.reset_joint_scale = default_rnd.reset_joint_scale if varied else (1.0, 1.0)
+    rnd.reset_lin_vel = default_rnd.reset_lin_vel if varied else 0.0
+    rnd.reset_ang_vel = default_rnd.reset_ang_vel if varied else 0.0
 
 
 # Curriculum levels live in the env processes and would start over with every new run; they are

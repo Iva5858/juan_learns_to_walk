@@ -426,10 +426,16 @@ class BipedEnv(gym.Env):
         d.qpos[self._qpos_idx] += rng.uniform(-0.05, 0.05, self.nu)
         d.qvel[:] = rng.uniform(-0.05, 0.05, self.model.nv)
         mujoco.mj_forward(self.model, d)
+        if cfg.randomization.enabled:
+            self._vary_start_state()
 
+        return self._start_episode(options or {})
+
+    def _start_episode(self, options):
+        """Everything an episode starts with besides the physics: commands, timers, histories."""
+        cfg, rng, d = self.cfg, self.np_random, self.data
         # Commands. options={"speed": v} (forward only) or {"command": (vx, vy, yaw_rate)} or
         # {"stand": True} fix the command for the whole episode (evaluation, videos).
-        options = options or {}
         self._cmd_fixed = any(k in options for k in ("speed", "command", "stand"))
         self._standing, self._ep_max_cmd = False, -np.inf
         if "stand" in options:
@@ -473,6 +479,27 @@ class BipedEnv(gym.Env):
         self._target_buf.extend([self._target] * self._target_buf.maxlen)
         return self._get_obs(), {}
 
+    def _vary_start_state(self):
+        """Start from a perturbed crouch, moving (RandomizationConfig.reset_*). The robot is then
+        lowered or raised so its lowest sole sits where it does in the home pose: bending the legs
+        changes their length, and a foot starting inside the floor would be shot out of it."""
+        c, d, rng = self.cfg.randomization, self.data, self.np_random
+        if tuple(c.reset_joint_scale) == (1.0, 1.0) and c.reset_lin_vel == 0 and c.reset_ang_vel == 0:
+            return  # off (runs up to juan_v7): no extra random draws
+        qi = self._qpos_idx
+        noise = d.qpos[qi] - self._home_joint
+        d.qpos[qi] = np.clip(self._home_joint * rng.uniform(*c.reset_joint_scale, self.nu) + noise,
+                             self._jnt_lo, self._jnt_hi)
+        d.qvel[0:2] += rng.uniform(-c.reset_lin_vel, c.reset_lin_vel, 2)
+        d.qvel[3:6] += rng.uniform(-c.reset_ang_vel, c.reset_ang_vel, 3)
+        mujoco.mj_forward(self.model, d)
+        self._ground()
+
+    def _ground(self):
+        """Raise or lower the robot so its lowest sole sits where it does in the home pose."""
+        self.data.qpos[2] -= self._soles()[0][:, 2].min() - self._home_sole_z.min()
+        mujoco.mj_forward(self.model, self.data)
+
     def _episode_was_safe(self):
         w = self.cfg.rewards
         return (self._ep_peak["torque"] < w.safe_torque and self._ep_peak["speed"] < w.safe_joint_speed
@@ -502,6 +529,60 @@ class BipedEnv(gym.Env):
                                           rc.push_start, rc.push_velocity)
             self._push_tally[k] = 0.0
 
+    def _servo_torque(self, target, slack, inv_speed):
+        """The hobby-servo model at one physics step: (joint speed, PD torque, applied torque)."""
+        d = self.data
+        qd = d.qvel[self._dof_idx]
+        # A miscalibrated servo holds its own idea of the angle: physically target + offset.
+        err = target + self._joint_off - d.qpos[self._qpos_idx]
+        if slack is not None:  # gear slack: no restoring torque until the gap is taken up
+            err = np.sign(err) * np.maximum(np.abs(err) - slack, 0.0)
+        tau = self._kp * err - self._kd * qd
+        # Linear torque-speed curve: no torque left at no-load speed.
+        s = qd * inv_speed
+        upper = self._stall * np.minimum(np.maximum(1.0 - s, 0.0), 1.0)
+        lower = -self._stall * np.minimum(np.maximum(1.0 + s, 0.0), 1.0)
+        return qd, tau, np.minimum(np.maximum(tau, lower), upper)
+
+    # ------------------------------------------------------------------ scripted motion (play.py)
+    def place_pose(self, joints):
+        """Put the robot standing still in joint pose `joints` (absolute angles), soles on the floor."""
+        d = self.data
+        d.qpos[self._qpos_idx] = np.clip(joints, self._jnt_lo, self._jnt_hi)
+        d.qvel[:] = 0.0
+        self._target = d.qpos[self._qpos_idx].copy()
+        mujoco.mj_forward(self.model, d)
+        self._ground()
+
+    def hold_pose(self, joints):
+        """One control step with the servos driven straight to joint angles `joints`: no policy,
+        no reward. For scripted motions, e.g. the boot sequence (straight legs -> home crouch);
+        the policy's actions only reach +-action_scale around home."""
+        self._target = np.clip(joints, self._jnt_lo, self._jnt_hi)
+        slack = self._backlash if self._backlash.any() else None
+        for _ in range(self.frame_skip):
+            *_, tau_c = self._servo_torque(self._target, slack, 1.0 / self._speed)
+            self.data.ctrl[:] = tau_c
+            mujoco.mj_step(self.model, self.data)
+        return not (self._non_foot_ground_contact() or self._gravity_body()[2] > -0.6)  # still up?
+
+    def start_policy(self, options=None):
+        """Hand over to the policy from wherever the robot is now (after a scripted motion), the
+        way the real robot will: the start heading is the current one, histories are filled with
+        the current readings, the last action and the filter are zero. Returns the observation."""
+        R = self._root_rot()
+        self._heading0 = float(np.arctan2(R[1, 0], R[0, 0]))
+        self._heading_target = self._heading0
+        self._start_xy = self.data.qpos[0:2].copy()
+        self._ref_xy = self._start_xy.copy()
+        return self._start_episode(options or {"stand": True})[0]
+
+    def set_command(self, forward, sideways=0.0, turn_rate=0.0):
+        """Change the command mid-episode (keyboard, joystick). All zero = stand still."""
+        self._cmd_vec = np.array([forward, sideways, turn_rate], dtype=float)
+        self._cmd = float(forward)
+        self._standing = not np.any(self._cmd_vec)
+
     def step(self, action):
         cfg, m, d = self.cfg, self.model, self.data
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
@@ -524,17 +605,7 @@ class BipedEnv(gym.Env):
         for k in range(self.frame_skip):
             if k == self._latency_steps:
                 self._target = new_target
-            qd = d.qvel[di]
-            # A miscalibrated servo holds its own idea of the angle: physically target + offset.
-            err = self._target + self._joint_off - d.qpos[qi]
-            if slack is not None:  # gear slack: no restoring torque until the gap is taken up
-                err = np.sign(err) * np.maximum(np.abs(err) - slack, 0.0)
-            tau = kp * err - kd * qd
-            # Linear torque-speed curve: no torque left at no-load speed.
-            s = qd * inv_speed
-            upper = stall * np.minimum(np.maximum(1.0 - s, 0.0), 1.0)
-            lower = -stall * np.minimum(np.maximum(1.0 + s, 0.0), 1.0)
-            tau_c = np.minimum(np.maximum(tau, lower), upper)
+            qd, tau, tau_c = self._servo_torque(self._target, slack, inv_speed)
             saturated += np.count_nonzero(tau != tau_c)
             tau_sq += tau_c * tau_c
             power += np.abs(tau_c * qd)
