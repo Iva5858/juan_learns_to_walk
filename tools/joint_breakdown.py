@@ -74,8 +74,11 @@ def main():
     text = (run / "config.json").read_text()
     cfg = EnvConfig.from_dict(json.loads(text))
     cfg.randomization.enabled = a.mode != "nominal"
-    if a.mode == "nopush":
-        cfg.randomization.push_velocity = 0.0
+    # The standard test, the same for every run: random shoves up to 0.3 m/s per axis (no push
+    # curriculum), and the full-difficulty robot (no physics curriculum).
+    cfg.randomization.push_curriculum = False
+    cfg.randomization.physics_curriculum = False
+    cfg.randomization.push_velocity = 0.0 if a.mode == "nopush" else 0.3
     if not a.keep_limits:
         cfg.rewards.break_joint_speed = 1e9
         cfg.rewards.break_impact = 1e9

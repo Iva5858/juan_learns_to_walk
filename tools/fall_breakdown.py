@@ -35,6 +35,8 @@ def main():
     p.add_argument("-n", type=int, default=50)
     p.add_argument("--speed", type=float, default=0.4)
     p.add_argument("--best", action="store_true")
+    p.add_argument("--physics-from", help="test on another run's robot: its randomization and hardware-limit "
+                   "rule (e.g. runs/juan_v7_4_pushes, to test an older policy on the realistic robot)")
     p.add_argument("--out", required=True)
     a = p.parse_args()
 
@@ -42,8 +44,16 @@ def main():
     text = (run / "config.json").read_text()
     cfg = EnvConfig.from_dict(json.loads(text))
     cfg.randomization.enabled = True
-    if a.mode == "nopush":
-        cfg.randomization.push_velocity = 0.0
+    if a.physics_from:
+        other = EnvConfig.from_dict(json.loads((PROJECT / a.physics_from / "config.json").read_text()))
+        cfg.randomization = other.randomization
+        for k in ("break_impact", "break_joint_speed", "break_requires_load"):
+            setattr(cfg.rewards, k, getattr(other.rewards, k))
+    # The standard test, the same for every run: random shoves up to 0.3 m/s per axis (no push
+    # curriculum), and the full-difficulty robot (no physics curriculum).
+    cfg.randomization.push_curriculum = False
+    cfg.randomization.physics_curriculum = False
+    cfg.randomization.push_velocity = 0.0 if a.mode == "nopush" else 0.3
     env = DummyVecEnv([lambda: BipedEnv(cfg.to_dict())])
     env = VecNormalize.load(str(run / ("best_vecnormalize.pkl" if a.best else "vecnormalize.pkl")), env)
     env.training, env.norm_reward = False, False
