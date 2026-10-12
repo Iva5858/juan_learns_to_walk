@@ -46,38 +46,42 @@ else
     fi
 fi
 
+# Before pushes, the physics stage must have reached full difficulty: extend it (up to 3 times) until
+# it does. Done here, at the start of stage 4, so "./train_v7.sh pushes" also resumes correctly.
+physics_gate() {
+    local base="${NAME}_3_physics" n level
+    for n in 1 2 3 4; do
+        level=$($PY -c "import json; print(json.load(open('runs/$prev/curriculum.json'))['difficulty'])")
+        echo "=== $(date '+%H:%M') physics difficulty reached: $level (runs/$prev) ===" | tee -a "runs/$NAME.log"
+        $PY -c "import sys; sys.exit(0 if $level >= 0.99 else 1)" && return
+        if [[ $n == 4 ]]; then
+            echo "=== WARNING: physics difficulty still $level after 3 extensions; stage 4 trains at full" \
+                 "difficulty anyway ===" | tee -a "runs/$NAME.log"
+            return
+        fi
+        [[ -d runs/${base}_more$n ]] && { prev="${base}_more$n"; continue; }  # already done earlier
+        echo "=== $(date '+%H:%M') extending physics -> runs/${base}_more$n ===" | tee -a "runs/$NAME.log"
+        caffeinate -i $PY train.py --run-name "${base}_more$n" --stage physics --timesteps "$more_steps" \
+            --resume "runs/$prev" ${extra[@]+"${extra[@]}"} >> "runs/$NAME.log" 2>&1
+        prev="${base}_more$n"
+    done
+}
+
 started=false
 for i in "${!stages[@]}"; do
     stage=${stages[$i]}
     run="${NAME}_$((i + 1))_${stage}"
     [[ $stage == "$start" ]] && started=true
     if $started; then
+        [[ $stage == pushes ]] && physics_gate
         resume=()
         [[ -n $prev ]] && resume=(--resume "runs/$prev")
         echo "=== $(date '+%H:%M') stage $((i + 1))/4: $stage -> runs/$run ===" | tee -a "runs/$NAME.log"
         caffeinate -i $PY train.py --run-name "$run" --stage "$stage" --timesteps "${steps[$i]}" \
             ${resume[@]+"${resume[@]}"} ${extra[@]+"${extra[@]}"} >> "runs/$NAME.log" 2>&1
         prev=$run
-        # The physics stage must reach full difficulty before pushes: extend it until it does.
-        if [[ $stage == physics ]]; then
-            for more in 1 2 3; do
-                level=$($PY -c "import json; print(json.load(open('runs/$prev/curriculum.json'))['_difficulty'])")
-                echo "=== $(date '+%H:%M') physics difficulty reached: $level ===" | tee -a "runs/$NAME.log"
-                $PY -c "import sys; sys.exit(0 if $level >= 0.99 else 1)" && break
-                [[ $more == 3 ]] && { echo "=== WARNING: physics difficulty still $level after 3 extensions;" \
-                    "stage 4 trains at full difficulty anyway ===" | tee -a "runs/$NAME.log"; break; }
-                ext="${run}_more$more"
-                echo "=== $(date '+%H:%M') extending physics -> runs/$ext ===" | tee -a "runs/$NAME.log"
-                caffeinate -i $PY train.py --run-name "$ext" --stage physics --timesteps "${more_steps}" \
-                    --resume "runs/$prev" ${extra[@]+"${extra[@]}"} >> "runs/$NAME.log" 2>&1
-                prev=$ext
-            done
-        fi
     elif [[ -d runs/$run ]]; then
-        prev=$run  # an earlier stage that already exists: resume from it (or its latest extension)
-        for ext in runs/${run}_more1 runs/${run}_more2 runs/${run}_more3; do
-            [[ -d $ext ]] && prev=${ext#runs/}
-        done
+        prev=$run  # an earlier stage that already exists: resume from it
     fi
 done
 echo "=== $(date '+%H:%M') done: final policy in runs/$prev ===" | tee -a "runs/$NAME.log"
