@@ -43,6 +43,8 @@ class CommandConfig:
     backward_speed: float = 0.1          # forward commands are drawn from [-backward_speed, top]
     stand_prob: float = 0.1              # share of commands that are "stand still, feet down"
     straight_prob: float = 0.3           # share of walking commands with no sideways/turn part
+    turn_in_place_prob: float = 0.2      # share of walking commands that only turn (forward = sideways = 0):
+                                         # otherwise rare, and juan_v7_6 turned in place at 0.41 of 0.6 rad/s
     resample_interval: tuple = (2.0, 8.0)  # s between new commands within an episode
     # Forward speed command. The upper end grows automatically
     # (speed curriculum) while the robot tracks its top commands without falling,
@@ -225,7 +227,7 @@ LEGACY = {
               "hip_roll_joints": ("l_hip_roll", "r_hip_roll", "left_hip_roll", "right_hip_roll"),
               "mirror_pairs": (("l_hip_roll", "r_hip_roll", -1), ("l_hip_pitch", "r_hip_pitch", 1),
                                ("l_knee", "r_knee", 1), ("l_ankle", "r_ankle", 1)) + juan.MIRROR_PAIRS},
-    "command": {"mode": "forward"},
+    "command": {"mode": "forward", "turn_in_place_prob": 0.0},
     "rewards": {"break_requires_load": 0.0},
     "randomization": {"total_mass_scale": (1.0, 1.0), "torso_mass_scale": (1.0, 1.0), "voltage_coupled": False,
                       "action_delay_steps": (0, 0), "obs_delay_steps": (0, 0), "backlash": (0.0, 0.0),

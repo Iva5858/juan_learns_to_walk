@@ -30,11 +30,14 @@ def reset(env, options):
 
 def sample(env):
     """Draw (forward, sideways, turn rate) and whether to stand. Forward speeds come from
-    [-backward_speed, top of the speed curriculum]; a share of commands is straight walking."""
+    [-backward_speed, top of the speed curriculum]; a share of commands is straight walking, and
+    a share only turns."""
     c, rng, cmd = env.cfg.command, env.np_random, env.command
     cmd.standing = bool(rng.uniform() < c.stand_prob)
     if cmd.standing:
         cmd.vec = np.zeros(3)
+    elif c.turn_in_place_prob > 0 and rng.uniform() < c.turn_in_place_prob:  # (no draw when off)
+        cmd.vec = np.array([0.0, 0.0, rng.uniform(*c.yaw_rate_range)])
     else:
         vx = rng.uniform(-c.backward_speed, env.curriculum.speed_max)
         if rng.uniform() < c.straight_prob:
