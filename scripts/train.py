@@ -53,7 +53,9 @@ def main():
     p.add_argument("--lr", type=float, help="learning rate (with --resume: overrides the saved one; "
                    "use smaller values for late fine-tuning, where the policy's noise is tiny)")
     p.add_argument("--reward", nargs="*", default=[], metavar="NAME=VALUE",
-                   help="override reward weights for this run, e.g. --reward symmetry=3 gait_mismatch=0.3")
+                   help="override reward weights for this run (after --stage), e.g. --reward symmetry=3 gait_mismatch=0.3")
+    p.add_argument("--command", nargs="*", default=[], metavar="NAME=VALUE",
+                   help="override command settings for this run (after --stage), e.g. --command backward_prob=0.3")
     args = p.parse_args()
 
     run_dir = Path("runs") / args.run_name
@@ -73,15 +75,17 @@ def main():
         cfg.command.speed_range = (cfg.command.speed_range[0], args.max_speed)
     if args.swing_ratio is not None:
         cfg.command.swing_ratio = args.swing_ratio
-    for item in args.reward:
-        name, value = item.split("=")
-        if not hasattr(cfg.rewards, name):
-            raise SystemExit(f"unknown reward weight: {name}")
-        setattr(cfg.rewards, name, float(value))
     if args.no_joint_feedback:
         cfg.robot.joint_feedback = False
     if args.stage:
         apply_stage(cfg, args.stage)
+    # Overrides last, so the stage's settings don't undo them.
+    for group, items in (("rewards", args.reward), ("command", args.command)):
+        for item in items:
+            name, value = item.split("=")
+            if not hasattr(getattr(cfg, group), name):
+                raise SystemExit(f"unknown {group} setting: {name}")
+            setattr(getattr(cfg, group), name, float(value))
     (run_dir / "config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
 
     env_kwargs = {"config": cfg.to_dict()}

@@ -43,6 +43,7 @@ class TrainingDashboard(BaseCallback):
     def _on_rollout_start(self):
         self._sums, self._count, self._ends = {}, 0, {"fell": 0, "broke": 0, "survived": 0}
         self._ep_seconds = []
+        self._backward = np.zeros(2)  # speed reached, speed commanded, over backward commands
 
     def _add(self, key, value):
         self._sums[key] = self._sums.get(key, 0.0) + float(value)
@@ -55,6 +56,8 @@ class TrainingDashboard(BaseCallback):
             self._add("2_commands/turn_rate_error_radps", abs(info["yaw_rate"] - info["command_yaw_rate"]))
             self._add("2_commands/heading_error_deg", info["heading_error_deg"])
             self._add("2_commands/path_drift_cm", 100 * info["lateral_offset"])
+            if info["command"] < -0.03:
+                self._backward += (info["forward_velocity"], info["command"])
             self._add("1_overview/speed_error_mps", info["speed_error"])
             self._add("1_overview/top_speed_command_mps", info["speed_max"])
             self._add("1_overview/push_strength_mps_avg_direction", info["push_level_mean"])
@@ -93,6 +96,8 @@ class TrainingDashboard(BaseCallback):
             self.logger.record("1_overview/hardware_limit_stops_pct_of_episodes", 100 * self._ends["broke"] / episodes)
         if self._ep_seconds:
             self.logger.record("1_overview/episode_seconds", float(np.mean(self._ep_seconds)))
+        if self._backward[1] < 0:  # 0 = stands still when told to back up, 100 = full speed
+            self.logger.record("2_commands/backward_speed_pct_of_command", 100 * self._backward[0] / self._backward[1])
 
 
 def end_of_clip(frames, fps):
