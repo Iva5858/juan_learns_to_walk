@@ -170,9 +170,10 @@ class RandomizationConfig:
     armature_scale: tuple = (0.5, 1.5)
     frictionloss_scale: tuple = (0.5, 2.0)
     latency: tuple = (0.005, 0.019)         # s, within one control step, before the new target applies
-    # Whole control steps of delay on top (20 ms each): reading 8 bus servos through the USB adapter
-    # likely takes 20-30 ms, so the real loop may lag a step or two. Total action delay: 5-59 ms.
-    action_delay_steps: tuple = (0, 2)      # new servo targets take effect this many steps late
+    # Whole control steps of delay on top (20 ms each). Bench (right leg, assembled): the servo starts
+    # moving 24-28 ms after a command, and reading 4 servos on a leg's bus takes ~15 ms, so at least
+    # one step. Total action delay: 25-59 ms (runs up to juan_v7_9: 0-2 steps, 5-59 ms).
+    action_delay_steps: tuple = (1, 2)      # new servo targets take effect this many steps late
     obs_delay_steps: tuple = (0, 1)         # IMU and joint readings are this many steps old
     # Servo imperfections
     backlash: tuple = (0.0, 0.017)          # rad (0-1 deg) of gear slack per joint: no restoring torque inside it

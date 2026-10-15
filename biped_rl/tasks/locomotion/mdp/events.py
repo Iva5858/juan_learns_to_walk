@@ -69,10 +69,10 @@ def randomize_physics(env):
         m.body_inertia[:] *= extra[:, None]
     if c.action_delay_steps[1] > 0:
         lo, hi = upto(c.action_delay_steps)
-        sv.action_delay = int(rng.integers(lo, int(round(hi)) + 1))
+        sv.action_delay = int(rng.integers(int(lo), int(round(hi)) + 1))
     if c.obs_delay_steps[1] > 0:
         lo, hi = upto(c.obs_delay_steps)
-        sv.obs_delay = int(rng.integers(lo, int(round(hi)) + 1))
+        sv.obs_delay = int(rng.integers(int(lo), int(round(hi)) + 1))
     if c.backlash[1] > 0:
         sv.backlash = rng.uniform(*upto(c.backlash), size=nu)
     if c.joint_offset > 0:

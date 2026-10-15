@@ -29,6 +29,13 @@ from biped_rl.training.ppo import new_model
 from biped_rl.training.stages import STAGES, apply_stage, load_curriculum, save_curriculum
 
 
+def parse_value(text):
+    """Command-line value: "3" -> 3, "0.5" -> 0.5, "1,2" -> (1, 2)."""
+    if "," in text:
+        return tuple(parse_value(v) for v in text.split(","))
+    return int(text) if text.lstrip("-").isdigit() else float(text)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--run-name", default="walk_v1")
@@ -56,6 +63,10 @@ def main():
                    help="override reward weights for this run (after --stage), e.g. --reward symmetry=3 gait_mismatch=0.3")
     p.add_argument("--command", nargs="*", default=[], metavar="NAME=VALUE",
                    help="override command settings for this run (after --stage), e.g. --command backward_prob=0.3")
+    p.add_argument("--robot", nargs="*", default=[], metavar="NAME=VALUE",
+                   help="override robot / servo settings, e.g. --robot no_load_speed=3.0 kp=6")
+    p.add_argument("--randomization", nargs="*", default=[], metavar="NAME=VALUE",
+                   help="override randomization settings, e.g. --randomization action_delay_steps=1,2")
     args = p.parse_args()
 
     run_dir = Path("runs") / args.run_name
@@ -80,12 +91,13 @@ def main():
     if args.stage:
         apply_stage(cfg, args.stage)
     # Overrides last, so the stage's settings don't undo them.
-    for group, items in (("rewards", args.reward), ("command", args.command)):
+    for group, items in (("rewards", args.reward), ("command", args.command), ("robot", args.robot),
+                         ("randomization", args.randomization)):
         for item in items:
             name, value = item.split("=")
             if not hasattr(getattr(cfg, group), name):
                 raise SystemExit(f"unknown {group} setting: {name}")
-            setattr(getattr(cfg, group), name, float(value))
+            setattr(getattr(cfg, group), name, parse_value(value))
     (run_dir / "config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
 
     env_kwargs = {"config": cfg.to_dict()}
