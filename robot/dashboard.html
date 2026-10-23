@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Juan dashboard</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--text:#1d2129;--muted:#6b7280;--line:#e3e5e8;--accent:#2563eb;--band:#dbe4f5;--warn:#c2410c;--bad:#dc2626;--ok:#15803d}
+@media (prefers-color-scheme:dark){:root{--bg:#111316;--card:#1b1e23;--text:#e8eaed;--muted:#9aa0a6;--line:#2c3036;--accent:#60a5fa;--band:#25324a;--warn:#fbbf24;--bad:#f87171;--ok:#4ade80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 -apple-system,system-ui,sans-serif}
+header{padding:20px 16px 4px;display:flex;flex-wrap:wrap;align-items:baseline;gap:12px}
+h1{font-size:20px;margin:0}
+h2{font-size:16px;margin:0}
+#status{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px 12px}
+button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer}
+button.small{padding:4px 8px;font-size:12px}
+button.danger{border-color:var(--bad);color:var(--bad)}
+button.on{border-color:var(--ok);color:var(--ok)}
+button:disabled{opacity:.45;cursor:default}
+input[type=number],select,input[type=text]{font:inherit;padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+input[type=number]{width:80px}
+.alert{margin:0 16px 12px;padding:10px 14px;border-radius:10px;border:1px solid var(--bad);color:var(--bad);background:var(--card);font-weight:500}
+.alert.warn{border-color:var(--warn);color:var(--warn)}
+.alert div+div{margin-top:4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;padding:0 16px 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}
+.card.off{opacity:.55}
+.card.locked{border-color:var(--bad)}
+.label{font-size:13px;color:var(--muted)}
+.big{font-size:28px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
+.big small{font-size:15px;font-weight:500;color:var(--muted)}
+.sub{font-size:13px;color:var(--muted)}
+.meter{height:8px;border-radius:4px;background:var(--line);margin:10px 0 8px;overflow:hidden}
+.meter div{height:100%;width:0;background:var(--ok);transition:width .4s}
+.ok{color:var(--ok)!important}.warn{color:var(--warn)!important}.bad{color:var(--bad)!important}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.kv div{font-size:12px;color:var(--muted)}
+.kv b{display:block;font-size:15px;color:var(--text);font-variant-numeric:tabular-nums}
+.legs{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 16px 24px}
+@media (max-width:900px){.legs{grid-template-columns:1fr}}
+.leg{display:grid;gap:12px;align-content:start}
+.leg>h2{margin:4px 0 0}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.top h3{font-size:16px;margin:0}
+.top h3 small{font-weight:400;color:var(--muted);font-size:13px}
+.angle{font-size:30px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+.angle small{font-size:14px;font-weight:400;color:var(--muted)}
+.range{width:100%;height:40px;display:block;margin-top:6px}
+input[type=range]{width:100%;margin:6px 0 2px;accent-color:var(--accent)}
+.nudge{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.nudge .hint{font-size:12px;color:var(--muted);margin-left:auto}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0;padding:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.stats div{font-size:12px;color:var(--muted)}
+.stats b{display:block;font-size:14px;color:var(--text);font-variant-numeric:tabular-nums}
+.lim{font-size:12px;color:var(--muted)}
+.lim .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.steps{margin:8px 0 0;padding-left:20px;font-size:14px}
+.steps li{margin:8px 0}
+.steps li .sub{display:block}
+.cam[hidden]{display:none}
+.cam{width:100%;aspect-ratio:4/3;border-radius:8px;background:var(--bg);display:block;object-fit:contain;margin-top:8px}
+.horizon{width:100%;height:110px;display:block;margin-top:6px}
+.walk{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media (max-width:700px){.walk{grid-template-columns:1fr}}
+.pad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(3,48px);gap:6px;justify-content:center;margin-top:8px}
+.pad button{padding:0;font-size:18px}
+.side{display:flex;gap:6px;justify-content:center;margin-top:6px}
+.cmdline{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:6px}
+button.go{border-color:var(--ok);color:var(--ok)}
+kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px}
+</style></head>
+<body>
+<header><h1>Juan</h1><span id="status">Connecting...</span></header>
+<div class="bar">
+  <button onclick="api('/scan').then(()=>flash('Rescanned'))">Rescan</button>
+  <label class="sub">Move time <input id="ms" type="number" min="0" max="5000" step="50" value="300"> ms</label>
+  <button onclick="api('/boot')" title="Straight legs over 2 s, then the home crouch over 2.5 s">Boot: straight &rarr; home</button>
+  <button onclick="api('/pose?name=straight&ms=2500')">Straight</button>
+  <button onclick="api('/pose?name=home&ms=2500')">Home</button>
+  <button onclick="api('/relax')">Relax all</button>
+  <button class="danger" onclick="api('/stop')">Stop all</button>
+</div>
+<div id="alerts"></div>
+
+<div class="grid">
+  <div class="card">
+    <div class="label">Battery (servo pack)</div>
+    <div class="big"><span id="bv">-</span> <small id="bpct"></small></div>
+    <div class="meter"><div id="bbar"></div></div>
+    <div class="sub" id="bnote">Read from the servos</div>
+  </div>
+  <div class="card">
+    <div class="label">Raspberry Pi</div>
+    <div class="big"><span id="pitemp">-</span></div>
+    <div class="sub">CPU temperature &middot; servos relax at <span id="pilim"></span>&deg;C &middot; Power <b id="pipower">-</b></div>
+    <div class="kv" id="buses"></div>
+  </div>
+  <div class="card">
+    <div class="label">IMU</div>
+    <div class="big"><span id="lean">-</span></div>
+    <svg class="horizon" id="horizon" viewBox="0 0 220 110"></svg>
+    <div class="kv" id="imukv"></div>
+    <div class="sub" id="imunote"></div>
+  </div>
+  <div class="card">
+    <div class="top"><div class="label">Camera</div><button class="small" id="camBtn" onclick="toggleCam()">Show</button></div>
+    <img class="cam" id="cam" alt="" hidden>
+    <div class="sub" id="camnote">Off until shown (the stream costs CPU).</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card" style="grid-column:1/-1">
+    <div class="top"><h2>Walking policy</h2><span class="sub" id="wstatus">off</span></div>
+    <div class="walk">
+      <div>
+        <div class="nudge" style="margin-top:8px">
+          <select id="wpolicy"></select>
+          <button class="go" id="wstart" onclick="startPolicy()">Start</button>
+          <button class="danger" onclick="api('/policy/stop')">Stop (hold)</button>
+        </div>
+        <div class="cmdline" id="wcmd">-</div>
+        <div class="sub" id="wstats"></div>
+        <div class="sub" style="margin-top:8px">Start from Home (Boot first), robot standing or hanging. The command starts at
+          "stand still". Steering: <kbd>&uarr;</kbd><kbd>&darr;</kbd> forward/back, <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn,
+          <kbd>,</kbd><kbd>.</kbd> sideways, <kbd>space</kbd> stand still, <kbd>Esc</kbd> stop.
+          It stops by itself (servos hold) if a sensor goes quiet or the page is closed for 3 s
+          (it stands still after 1 s), and relaxes everything if it tilts past 40&deg;.</div>
+        <div class="sub" style="margin-top:6px">Servo move time per step
+          <select id="wms" onchange="api('/policy/move_ms?ms=' + this.value)"><option value="0">0 ms (as in training)</option><option value="20">20 ms</option></select></div>
+      </div>
+      <div>
+        <div class="pad">
+          <span></span><button onclick="cmdStep(1,0,0)">&uarr;</button><span></span>
+          <button onclick="cmdStep(0,0,1)">&#8634;</button><button onclick="cmdZero()">&#9632;</button><button onclick="cmdStep(0,0,-1)">&#8635;</button>
+          <span></span><button onclick="cmdStep(-1,0,0)">&darr;</button><span></span>
+        </div>
+        <div class="side"><button onclick="cmdStep(0,1,0)">&larr; side</button><button onclick="cmdStep(0,-1,0)">side &rarr;</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <div class="top"><h2>Calibration</h2><span class="sub" id="calstate"></span></div>
+    <ol class="steps">
+      <li><b>Zero.</b> Relax all, hold both legs perfectly straight (a jig or a flat wall helps), then
+        <button class="small" onclick="confirmApi('Legs straight and still? Every joint\'s current position becomes 0°.', '/cal/zero')">Set zero: legs straight</button>
+        <span class="sub">Every angle on this page is the simulator's: legs straight = 0&deg;.</span></li>
+      <li><b>Directions.</b> On each joint, torque on and press <b>+5&deg;</b>. It must move the way the card says (e.g. "+ = knee bends").
+        If it goes the other way, press <b>Flip</b> on that card.</li>
+      <li><b>Limits.</b> Relax a joint, move it by hand to where it touches something (another part, a cable, its own bracket), back off a few degrees, and press <b>Lower here</b> / <b>Upper here</b>.
+        Until both are set, a joint uses the simulator's range.</li>
+      <li><b>Store in the servos.</b> <button class="small" onclick="confirmApi('Write the limits into every servo\'s memory? The servos then refuse targets outside them, whatever program sends them.', '/cal/write_limits')">Write limits to servos</button>
+        <button class="small" onclick="confirmApi('Reset every servo\'s stored limits to the full 0-1000?', '/cal/write_limits?reset=1')">Reset servo limits</button>
+        <span class="sub">The dashboard clamps every move to the limits either way; this also protects against other programs.</span></li>
+      <li><b>IMU.</b> Torso axes from sensor axes:
+        <select id="ax0"></select> <select id="ax1"></select> <select id="ax2"></select>
+        <button class="small" onclick="setAxes()">Apply</button>
+        I2C bus <input id="imubus" type="number" min="0" max="20" style="width:60px"> <button class="small" onclick="api('/cal/imu?bus='+document.getElementById('imubus').value)">Apply</button>
+        <span class="sub">Check: tip the robot forward &rarr; "lean forward" goes up; tip it to its right &rarr; "lean right" goes up.
+        Gyro, turning it quickly: rolling right &rarr; x positive; pitching nose down &rarr; y positive; turning left (counter-clockwise from above) &rarr; z positive.
+        Robot still: <button class="small" onclick="api('/cal/zero_gyro')">Zero gyro (2 s)</button> (also done at start-up). Stand it level and press
+        <button class="small" onclick="api('/cal/imu_level')">Level here</button> (display only).</span></li>
+    </ol>
+  </div>
+</div>
+
+<div class="legs">
+  <div class="leg" id="leg_left"><h2>Left leg</h2></div>
+  <div class="leg" id="leg_right"><h2>Right leg</h2></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const n1 = (v, d = 1) => (v === null || v === undefined) ? '?' : v.toFixed(d);
+const LABEL = {hip_roll: 'Hip roll', hip_pitch: 'Hip pitch', knee: 'Knee', ankle: 'Ankle'};
+let S = null, built = false, flashText = '', flashUntil = 0;
+
+function flash(t) { flashText = t; flashUntil = Date.now() + 4000; $('status').textContent = t; }
+async function api(path) {
+  try {
+    const r = await fetch(path);
+    const j = r.headers.get('content-type')?.includes('json') ? await r.json() : {};
+    if (j.error) flash(j.error);
+    else if (j.written) flash(j.written.length ? 'Limits written to ' + j.written.length + ' servos' : 'No joint has both limits set yet');
+    return j;
+  } catch (e) { flash("Couldn't reach the Pi"); }
+}
+function confirmApi(text, path) { if (confirm(text)) api(path); }
+
+// ---- joint cards ----
+function card(name, j) {
+  const part = name.replace(/^(left|right)_/, '');
+  return `<div class="card" id="c_${name}">
+    <div class="top"><h3>${LABEL[part]} <small>servo ${j.id}</small></h3>
+      <button class="small" id="tq_${name}" onclick="toggleTorque('${name}')">Torque ?</button></div>
+    <div class="angle"><span id="a_${name}">-</span> <small id="ac_${name}"></small></div>
+    <svg class="range" id="r_${name}" viewBox="0 0 300 40"></svg>
+    <input type="range" id="s_${name}" step="0.5" oninput="slide('${name}', this.value)">
+    <div class="nudge">
+      <button class="small" onclick="nudge('${name}',-5)">&minus;5&deg;</button>
+      <button class="small" onclick="nudge('${name}',-1)">&minus;1&deg;</button>
+      <button class="small" onclick="nudge('${name}',1)">+1&deg;</button>
+      <button class="small" onclick="nudge('${name}',5)">+5&deg;</button>
+      <span class="hint">+ = ${j.meaning}</span>
+    </div>
+    <div class="stats">
+      <div>Target<b id="t_${name}">-</b></div>
+      <div>Temp<b id="te_${name}">-</b></div>
+      <div>Voltage<b id="v_${name}">-</b></div>
+      <div>Counts<b id="k_${name}">-</b></div>
+    </div>
+    <div class="lim">
+      <div id="l_${name}"></div>
+      <div class="row">
+        <button class="small" onclick="api('/cal/limit?joint=${name}&end=lo')">Lower here</button>
+        <button class="small" onclick="api('/cal/limit?joint=${name}&end=hi')">Upper here</button>
+        <button class="small" onclick="api('/cal/clear_limits?joint=${name}')">Clear limits</button>
+        <button class="small" onclick="confirmApi('Flip this joint\\'s direction?', '/cal/flip?joint=${name}')">Flip</button>
+        <button class="small" onclick="api('/relax?joint=${name}')">Relax</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function build() {
+  for (const [name, j] of Object.entries(S.joints))
+    $('leg_' + name.split('_')[0]).insertAdjacentHTML('beforeend', card(name, j));
+  const opts = ['x', '-x', 'y', '-y', 'z', '-z'].map(a => `<option>${a}</option>`).join('');
+  ['ax0', 'ax1', 'ax2'].forEach((id, k) => { $(id).innerHTML = opts; $(id).value = S.imu_stats.axes[k]; });
+  $('imubus').value = S.imu_stats.bus;
+  $('pilim').textContent = S.limits.pi_temp;
+  built = true;
+}
+
+const lastInput = {};
+let pending = {}, busy = false;
+function slide(name, deg) { lastInput[name] = Date.now(); pending[name] = deg; if (!busy) sendNext(); }
+function sendNext() {
+  const name = Object.keys(pending)[0];
+  if (name === undefined) { busy = false; return; }
+  busy = true;
+  const deg = pending[name]; delete pending[name];
+  fetch(`/move?joint=${name}&deg=${deg}&ms=${$('ms').value || 300}`)
+    .then(r => r.json()).then(j => { if (j.error) flash(j.error); }).catch(() => {}).finally(sendNext);
+}
+function nudge(name, d) {
+  const j = S.joints[name];
+  const from = j.torque && j.target_deg !== null && j.target_deg !== undefined ? j.target_deg : j.deg;
+  if (from === null || from === undefined) return flash('No position reading');
+  const deg = Math.max(j.limits[0], Math.min(j.limits[1], from + d));
+  $('s_' + name).value = deg;
+  slide(name, deg);
+}
+function toggleTorque(name) {
+  api(S.joints[name].torque ? `/relax?joint=${name}` : `/hold?joint=${name}`);
+}
+
+function rangeSvg(j, W) {
+  const lo = Math.min(j.sim[0], j.limits[0]) - 5, hi = Math.max(j.sim[1], j.limits[1]) + 5;
+  const x = d => (6 + (d - lo) / (hi - lo) * (W - 12)).toFixed(1);
+  let s = `<rect x="${x(j.sim[0])}" y="14" width="${x(j.sim[1]) - x(j.sim[0])}" height="12" rx="3" fill="var(--band)"><title>simulator range ${j.sim[0]}..${j.sim[1]}</title></rect>`;
+  if (j.limits_set)
+    s += `<rect x="${x(j.limits[0])}" y="12" width="${x(j.limits[1]) - x(j.limits[0])}" height="16" rx="3" fill="none" stroke="var(--accent)" stroke-width="1.5"><title>physical limits</title></rect>`;
+  s += `<line x1="${x(0)}" x2="${x(0)}" y1="8" y2="32" stroke="var(--muted)" stroke-dasharray="2 2"/>`;
+  s += `<text x="${x(0)}" y="8" font-size="8" text-anchor="middle" fill="var(--muted)">0</text>`;
+  s += `<text x="${x(j.home)}" y="38" font-size="9" font-weight="700" text-anchor="middle" fill="var(--muted)">H</text>`;
+  if (j.torque && j.target_deg !== null && j.target_deg !== undefined)
+    s += `<line x1="${x(j.target_deg)}" x2="${x(j.target_deg)}" y1="10" y2="30" stroke="var(--accent)" stroke-width="2"/>`;
+  if (j.deg !== null && j.deg !== undefined)
+    s += `<circle cx="${x(j.deg)}" cy="20" r="5" fill="var(--text)"/>`;
+  return s;
+}
+
+function updateJoint(name, j) {
+  const c = $('c_' + name);
+  c.classList.toggle('off', !j.found || j.pos === null || j.pos === undefined);
+  c.classList.toggle('locked', j.locked);
+  $('a_' + name).textContent = j.found ? n1(j.deg) + '°' : 'Not found';
+  $('ac_' + name).textContent = j.found && j.pos !== null ? (j.torque ? 'holding' : 'relaxed') : '';
+  $('k_' + name).textContent = j.pos ?? '-';
+  $('t_' + name).textContent = j.torque && j.target_deg !== null && j.target_deg !== undefined ? n1(j.target_deg) + '°' : '-';
+  const te = $('te_' + name);
+  te.textContent = j.temp === null || j.temp === undefined ? '?' : j.temp + '°C';
+  te.className = j.temp >= S.limits.servo_temp ? 'bad' : j.temp >= S.limits.servo_temp - 10 ? 'warn' : '';
+  $('v_' + name).textContent = j.vin ? j.vin.toFixed(2) + ' V' : '?';
+  const tq = $('tq_' + name);
+  tq.textContent = j.torque ? 'Torque on' : j.torque === false ? 'Torque off' : 'Torque ?';
+  tq.classList.toggle('on', !!j.torque);
+  const svg = $('r_' + name), W = Math.max(100, Math.round(svg.clientWidth || 300));
+  svg.setAttribute('viewBox', `0 0 ${W} 40`);  // drawn at pixel size: markers don't stretch
+  svg.innerHTML = rangeSvg(j, W);
+  const sl = $('s_' + name);
+  sl.min = j.limits[0]; sl.max = j.limits[1];
+  sl.disabled = !j.found || j.locked;
+  // Relaxed, the slider follows the joint, so touching it never makes the joint jump.
+  // Held, it shows the target. Not while you're dragging it.
+  if (Date.now() - (lastInput[name] || 0) > 1500) {
+    const v = j.torque && j.target_deg !== null && j.target_deg !== undefined ? j.target_deg : j.deg;
+    if (v !== null && v !== undefined) sl.value = v;
+  }
+  const narrow = j.limits_set && (j.limits[0] > j.sim[0] + 1 || j.limits[1] < j.sim[1] - 1);
+  const mem = j.info && j.info.angle_limits ? ` &middot; in servo memory: ${j.info.angle_limits[0]}&ndash;${j.info.angle_limits[1]} counts` : '';
+  $('l_' + name).innerHTML = `Range ${n1(j.limits[0])}&deg; to ${n1(j.limits[1])}&deg; ` +
+    (j.limits_set ? '(set on the robot)' : '(simulator range: limits not set)') + mem +
+    (narrow ? `<div class="warn">Narrower than the simulator's ${j.sim[0]}&deg; to ${j.sim[1]}&deg;: the policy will be clipped here.</div>` : '');
+}
+
+// ---- summary cards ----
+const CURVE = [[3.27,0],[3.61,5],[3.69,10],[3.71,15],[3.73,20],[3.75,25],[3.77,30],[3.79,35],[3.80,40],[3.82,45],
+  [3.84,50],[3.85,55],[3.87,60],[3.91,65],[3.95,70],[3.98,75],[4.02,80],[4.08,85],[4.11,90],[4.15,95],[4.20,100]];
+function percent(v) {
+  if (v <= CURVE[0][0]) return 0;
+  for (let k = 1; k < CURVE.length; k++) { const [v0, p0] = CURVE[k - 1], [v1, p1] = CURVE[k];
+    if (v <= v1) return p0 + (p1 - p0) * (v - v0) / (v1 - v0); }
+  return 100;
+}
+let battV = null;
+function battery() {
+  const vins = Object.values(S.joints).map(j => j.vin).filter(v => v);
+  if (!vins.length) { $('bv').textContent = '-'; return; }
+  const now = Math.max(...vins);
+  battV = battV === null ? now : battV + 0.3 * (now - battV);
+  const p = Math.round(percent(battV / 3)), level = battV < 10.2 ? 'bad' : battV < 10.5 ? 'warn' : 'ok';
+  $('bv').textContent = battV.toFixed(2) + ' V';
+  $('bpct').textContent = '~' + p + '%';
+  $('bbar').style.width = p + '%';
+  $('bbar').style.background = 'var(--' + level + ')';
+  $('bnote').textContent = '3S pack, ' + (battV / 3).toFixed(2) + ' V per cell' +
+    (level === 'bad' ? ' · stop and charge' : level === 'warn' ? ' · charge soon' : '');
+}
+
+function pi() {
+  const p = S.pi, t = $('pitemp');
+  t.textContent = p.temp === null || p.temp === undefined ? '?' : p.temp.toFixed(1) + '°C';
+  t.className = p.temp >= S.limits.pi_temp ? 'bad' : p.temp >= S.limits.pi_temp - 10 ? 'warn' : '';
+  const w = $('pipower');
+  if (p.undervolt === undefined) { w.textContent = '?'; w.className = ''; }
+  else if (p.undervolt) { w.textContent = 'Too low!'; w.className = 'bad'; }
+  else if (p.throttled) { w.textContent = 'Throttled'; w.className = 'bad'; }
+  else if (p.undervolt_before) { w.textContent = 'Dipped earlier'; w.className = 'warn'; }
+  else { w.textContent = 'OK'; w.className = 'ok'; }
+  $('buses').innerHTML = S.buses.map(b => {
+    const leg = b.ids[0] <= 4 ? 'Left' : 'Right';
+    const cls = b.pass_ms > 18 ? 'bad' : b.pass_ms > 15 ? 'warn' : '';
+    return `<div>${leg} bus (${b.ids.length} reads)<b class="${cls}">${n1(b.pass_ms)} ms</b>max ${n1(b.pass_max)} &middot; fail ${n1(b.fail_pct)}%</div>`;
+  }).join('') || '<div>No servo bus found</div>';
+}
+
+function imu() {
+  const m = S.imu, st = S.imu_stats;
+  if (!m) {
+    $('lean').textContent = '-';
+    $('imunote').innerHTML = `<span class="bad">${S.imu_error || 'No reading'}</span>`;
+    $('horizon').innerHTML = ''; $('imukv').innerHTML = '';
+    return;
+  }
+  $('lean').textContent = `${n1(m.lean_forward)}° fwd, ${n1(m.lean_right)}° right`;
+  const tilt = Math.hypot(m.lean_forward, m.lean_right);
+  $('lean').className = tilt > 30 ? 'bad' : tilt > 10 ? 'warn' : '';
+  const roll = Math.max(-60, Math.min(60, m.lean_right)), pitch = Math.max(-45, Math.min(45, m.lean_forward));
+  $('horizon').innerHTML = `
+    <g transform="translate(110 55) rotate(${-roll}) translate(0 ${-pitch * 1.2})">
+      <rect x="-200" y="0" width="400" height="200" fill="var(--band)"/>
+      <line x1="-200" x2="200" y1="0" y2="0" stroke="var(--accent)" stroke-width="2"/></g>
+    <line x1="80" x2="140" y1="55" y2="55" stroke="var(--text)" stroke-width="3"/>
+    <circle cx="110" cy="55" r="3" fill="var(--text)"/>`;
+  const cal = v => `<span class="${v === 3 ? 'ok' : v === 0 ? 'bad' : 'warn'}">${v}/3</span>`;
+  const extra = m.calib ? `<div>Calibration<b>gyro ${cal(m.calib.gyro)}</b>accel ${cal(m.calib.accel)}</div>`
+    : `<div>Accel<b>${n1(m.accel_g, 2)} g</b>${m.biasing ? '<span class="warn">zeroing gyro...</span>' : 'bias ' + m.gyro_bias.map(b => b.toFixed(3)).join(' ')}</div>`;
+  $('imukv').innerHTML = `
+    <div>Gyro x<b>${n1(m.gyro[0], 2)}</b>rad/s</div><div>Gyro y<b>${n1(m.gyro[1], 2)}</b>rad/s</div><div>Gyro z<b>${n1(m.gyro[2], 2)}</b>rad/s</div>
+    <div>Gravity<b>${m.gravity.map(g => g.toFixed(2)).join(' ')}</b>sim frame</div>
+    ${extra}
+    <div>Reads<b class="${st.fail_pct > 1 ? 'bad' : ''}">${n1(st.fail_pct)}% bad</b>${n1(st.read_ms)} ms each</div>`;
+  $('imunote').textContent = `${m.device}, I2C bus ${st.bus}, axes ${st.axes.join(', ')}, yaw ${n1(m.yaw * 180 / Math.PI, 0)}°` + (m.age > 0.5 ? ' · reading is stale' : '');
+}
+
+let camOn = false;
+function toggleCam() {
+  camOn = !camOn;
+  $('cam').hidden = !camOn;
+  $('cam').src = camOn ? '/camera.mjpg?' + Date.now() : '';
+  $('camBtn').textContent = camOn ? 'Hide' : 'Show';
+  camNote();
+}
+function camNote() {
+  const c = S && S.camera;
+  $('camnote').textContent = c && !c.available ? 'Camera unavailable: ' + c.error
+    : c && c.error && camOn ? 'Camera error: ' + c.error
+    : camOn ? '640×480, 15 fps, hardware MJPEG' : 'Off until shown (the stream costs CPU).';
+}
+function setAxes() { api('/cal/imu?axes=' + ['ax0', 'ax1', 'ax2'].map(id => $(id).value).join(',')); }
+
+function alerts() {
+  const bad = [], warn = [];
+  if (S.pi_hot) bad.push(`The Pi reached ${S.limits.pi_temp}°C: all servos are relaxed until it cools.`);
+  for (const [id, t] of Object.entries(S.hot)) bad.push(`Servo ${id} is at ${t}°C: relaxed and locked until it cools.`);
+  if (!S.zero_set) warn.push('Not calibrated: angles are relative to count 500. Do step 1 (Set zero) before trusting any angle.');
+  const missing = Object.entries(S.joints).filter(([, j]) => !j.found).map(([n, j]) => j.id);
+  if (missing.length) warn.push(`Servo${missing.length > 1 ? 's' : ''} ${missing.join(', ')} not found. Check power and cables, then Rescan.`);
+  for (const [n, j] of Object.entries(S.joints)) {
+    const v = j.info && j.info.vin_limits;
+    if (v && v[1] < 12.6) { warn.push(`Servo ${j.id}'s voltage limit is ${v[1]} V: a full 3S pack (12.6 V) can make it go limp.`); break; }
+  }
+  $('alerts').innerHTML = (bad.length ? `<div class="alert">${bad.map(m => `<div>${m}</div>`).join('')}</div>` : '') +
+    (warn.length ? `<div class="alert warn">${warn.map(m => `<div>${m}</div>`).join('')}</div>` : '');
+}
+
+// ---- walking policy ----
+let W = null, cmd = [0, 0, 0];
+const STEP = [0.05, 0.05, 0.15];   // m/s forward, m/s sideways, rad/s turn per key press
+function walker() {
+  W = S.walker;
+  const sel = $('wpolicy');
+  if (sel.options.length !== W.policies.length) sel.innerHTML = W.policies.map(p => `<option>${p}</option>`).join('');
+  if (W.policy && !W.running) sel.value = W.policy;
+  $('wstart').disabled = W.running || !W.policies.length;
+  sel.disabled = W.running;
+  $('wms').value = W.move_ms;
+  const st = $('wstatus');
+  st.textContent = W.running ? `running ${W.policy}` : W.status;
+  st.className = W.running ? 'ok' : W.status.startsWith('stopped:') ? 'bad' : 'sub';
+  if (W.running && W.command) cmd = W.command.slice();
+  $('wcmd').textContent = W.running
+    ? (cmd.every(v => v === 0) ? 'Stand still' : `fwd ${cmd[0].toFixed(2)} m/s \u00b7 side ${cmd[1].toFixed(2)} m/s \u00b7 turn ${cmd[2].toFixed(2)} rad/s`)
+    : '-';
+  $('wstats').innerHTML = W.ticks !== undefined
+    ? `${(W.seconds || 0).toFixed(0)} s \u00b7 step ${n1(W.tick_ms)} ms (max ${n1(W.tick_max)}) of 20 \u00b7 late ${W.overruns} times` + (W.log ? ` \u00b7 log ${W.log}` : '')
+    : '';
+}
+function clampCmd(k, v) {
+  const r = W && W.ranges ? [W.ranges.forward_range, W.ranges.lateral_range, W.ranges.yaw_rate_range][k] : [-1, 1];
+  return Math.round(Math.min(r[1], Math.max(r[0], v)) * 100) / 100;
+}
+function sendCmd() { api(`/policy/cmd?vx=${cmd[0]}&vy=${cmd[1]}&wz=${cmd[2]}`); }
+function cmdStep(f, s, t) {
+  if (!W || !W.running) return flash('Start the policy first');
+  [f, s, t].forEach((d, k) => { cmd[k] = clampCmd(k, cmd[k] + d * STEP[k]); });
+  sendCmd();
+}
+function cmdZero() { cmd = [0, 0, 0]; if (W && W.running) sendCmd(); }
+function startPolicy() {
+  const name = $('wpolicy').value;
+  if (confirm(`Start ${name}? The robot must be at Home, hanging or standing on the floor (harness on). It starts standing still.`)) {
+    cmd = [0, 0, 0];
+    api('/policy/start?name=' + encodeURIComponent(name));
+  }
+}
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const k = {ArrowUp: [1, 0, 0], ArrowDown: [-1, 0, 0], ArrowLeft: [0, 0, 1], ArrowRight: [0, 0, -1], ',': [0, 1, 0], '.': [0, -1, 0]}[e.key];
+  if (k) { e.preventDefault(); cmdStep(...k); }
+  else if (e.key === ' ') { e.preventDefault(); cmdZero(); }
+  else if (e.key === 'Escape') api('/policy/stop');
+});
+
+async function poll() {
+  try {
+    S = await (await fetch('/state')).json();
+    if (!built) build();
+    for (const [name, j] of Object.entries(S.joints)) updateJoint(name, j);
+    battery(); pi(); imu(); walker(); alerts(); camNote();
+    $('calstate').textContent = S.zero_set ? 'Zero set' : 'Not calibrated';
+    $('status').textContent = Date.now() < flashUntil ? flashText
+      : S.message || `${Object.values(S.joints).filter(j => j.found).length} of 8 servos`;
+  } catch (e) {
+    $('status').textContent = 'Lost connection to the Pi';
+  }
+  setTimeout(poll, 300);
+}
+poll();
+</script>
+</body></html>

@@ -1,0 +1,4 @@
+pyserial
+smbus2
+numpy
+# camera: sudo apt install python3-picamera2 (not from pip)

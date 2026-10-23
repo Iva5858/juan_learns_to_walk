@@ -161,6 +161,7 @@ Walking clips land in `runs/<name>/videos/` every 1M steps, named with the dista
 | [biped_rl/training/](biped_rl/training/) | [ppo.py](biped_rl/training/ppo.py) (PPO hyperparameters, a fresh model), [stages.py](biped_rl/training/stages.py) (training stages, curriculum carry-over), [callbacks.py](biped_rl/training/callbacks.py) (TensorBoard dashboard, clips) |
 | [biped_rl/policy.py](biped_rl/policy.py), [symmetry.py](biped_rl/symmetry.py), [motions.py](biped_rl/motions.py) | Asymmetric actor-critic; mirror maps, the model check and symmetric normalization; the boot sequence |
 | [scripts/](scripts/) | Entry points: `train.py`, `train_v7.sh` (the v7 recipe), `evaluate.py`, `play.py` (keyboard driving), `warm_start.py`; [analysis/](scripts/analysis/) (the tools above); [model/](scripts/model/) (`postprocess_onshape.py`: CAD export → RL model, `inspect_model.py`: mass/limits check and stand test, `cad_to_mjcf.py`: URDF route) |
+| [robot/](robot/) | Runs on the Pi: [joints.py](robot/joints.py) (joint map and calibration), [hiwonder.py](robot/hiwonder.py) (servo bus), [imu.py](robot/imu.py) (LSM9DS1 + gravity filter, in the simulator's conventions; [bno055.py](robot/bno055.py) as a fallback), [policy.py](robot/policy.py) (numpy policy and the simulator's observation pipeline), [walker.py](robot/walker.py) (50 Hz loop, safety, logs), [camera.py](robot/camera.py), [dashboard.py](robot/dashboard.py), [selftest.py](robot/selftest.py), [BRINGUP.md](robot/BRINGUP.md) |
 | [juan/](juan/) | Juan's model from Onshape (`robot.xml`) and the RL-ready version (`rl_robot.xml`, `rl_scene.xml`) |
 | [models/simple_biped.xml](models/simple_biped.xml) | The placeholder biped used before Juan's CAD existed |
 | [reports/](reports/), [research_notes/](research_notes/) | Research: fall recovery best practices; Juan's electronics |
@@ -188,7 +189,22 @@ Next experiments: a 2-second history encoder (the dual-history architecture of L
 
 ## Deployment on the robot
 
-Deployment code is not written yet. This section specifies what it must match.
+The robot side lives in [robot/](robot/) and runs on the Pi; it needs only `pyserial`, `smbus2` and `numpy` (plus `python3-picamera2`), not the training stack. Bring-up, step by step: [robot/BRINGUP.md](robot/BRINGUP.md).
+
+### Robot dashboard
+
+```bash
+# on the computer: export a policy (numpy only), checked step by step against the simulator
+python scripts/export_policy.py runs/juan_v7_8_best      # -> robot/policies/juan_v7_8_best.npz
+
+# on the Pi, once
+sudo apt install python3-serial python3-smbus2 python3-numpy python3-picamera2 i2c-tools
+# on the Pi, from the project folder
+python3 -m robot.selftest     # reads every sensor, moves nothing
+python3 -m robot.dashboard    # then open http://<pi-name>.local:8000
+```
+
+All 8 servos (one BusLinker per leg: IDs 1–4 left, 5–8 right, in the order hip roll, hip pitch, knee, ankle), the IMU, the camera, the battery and the Pi's health. It shows angles in the simulator's convention (legs straight = 0°, signs below) and walks you through calibration: zero with the legs straight, check each joint's direction, set physical limits by hand, and store them in the servos' memory. Every move is clamped to the limits; the calibration is saved in `robot/calibration.json`. Servos relax at 60 °C, everything relaxes if the Pi reaches 75 °C. The bus cards show how long reading one leg's 4 servos takes, the number that sets the control loop's delay. The **walking policy** runs from the same page ([robot/walker.py](robot/walker.py)): start it at Home and steer with the arrow keys or the on-screen pad. It stops by itself if a sensor goes quiet or the page disconnects, relaxes everything past 40° of tilt, and logs every run to `robot/logs/`. The IMU is an LSM9DS1 (accelerometer + gyro, no on-chip fusion): [robot/imu.py](robot/imu.py) estimates gravity with a complementary filter (0.5 s), checked in closed loop in the simulator (2–3° mean error, the policy walks as with the true gravity). After changing the model, `python scripts/check_robot_joints.py` checks that [robot/joints.py](robot/joints.py) still matches it.
 
 ### Calibration before deployment
 

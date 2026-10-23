@@ -21,3 +21,6 @@ out/
 
 # Editable install metadata
 *.egg-info/
+
+# Robot run logs (copy the ones you want to compare with the simulator)
+robot/logs/
