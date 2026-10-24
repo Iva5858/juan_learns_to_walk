@@ -16,6 +16,8 @@ from collections import deque
 
 import numpy as np
 
+MAX_HEADING_ERROR = math.radians(110)  # training never goes past ~111 deg; the wrap is at 180
+
 
 class Policy:
     def __init__(self, path):
@@ -97,6 +99,13 @@ class Controller:
         ph = 2 * math.pi * (self.phase % 1.0)
         clock = [0.0, 0.0] if self.standing else [math.sin(ph), math.cos(ph)]
         yaw_err = (sensors["yaw"] - self.heading_target + math.pi) % (2 * math.pi) - math.pi
+        # If the robot falls far behind the commanded turn (slipping feet), the target waits for it:
+        # past +-180 deg the error would wrap and the policy would suddenly turn the other way. In
+        # training (v7_10, pushes and turns) 99.9% of errors are under 108 deg, so this cap
+        # changes almost nothing the policy has seen.
+        if abs(yaw_err) > MAX_HEADING_ERROR:
+            yaw_err = math.copysign(MAX_HEADING_ERROR, yaw_err)
+            self.heading_target = sensors["yaw"] - yaw_err
         return np.concatenate([*frames, self.command, clock, [math.sin(yaw_err), math.cos(yaw_err)]])
 
     def tick(self, sensors):
