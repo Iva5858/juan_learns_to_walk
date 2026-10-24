@@ -402,7 +402,8 @@ function imu() {
     <div>Gyro x<b>${n1(m.gyro[0], 2)}</b>rad/s</div><div>Gyro y<b>${n1(m.gyro[1], 2)}</b>rad/s</div><div>Gyro z<b>${n1(m.gyro[2], 2)}</b>rad/s</div>
     <div>Gravity<b>${m.gravity.map(g => g.toFixed(2)).join(' ')}</b>sim frame</div>
     ${extra}
-    <div>Reads<b class="${st.fail_pct > 1 ? 'bad' : ''}">${n1(st.fail_pct)}% bad</b>${n1(st.read_ms)} ms each</div>`;
+    <div>Reads<b class="${st.fail_pct > 1 ? 'bad' : ''}">${n1(st.fail_pct)}% bad</b>${n1(st.read_ms)} ms each</div>
+    <div>Vibration<b class="${m.gyro_raw_rms > 0.3 ? 'warn' : ''}">${n1(m.gyro_raw_rms, 2)}</b>rad/s raw (still: &lt;0.05)</div>`;
   $('imunote').textContent = `${m.device}, I2C bus ${st.bus}, axes ${st.axes.join(', ')}, yaw ${n1(m.yaw * 180 / Math.PI, 0)}°` + (m.age > 0.5 ? ' · reading is stale' : '');
 }
 

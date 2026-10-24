@@ -18,6 +18,12 @@ RATE_HZ = 200
 TAU_S = 0.5           # accelerometer correction time constant
 ACCEL_TRUST = 0.15    # use the accelerometer only within +-15% of 1 g (not during impacts)
 BIAS_SECONDS = 2.0    # gyro bias averaged over this long at start (robot still)
+# Low-pass on the gyro the POLICY sees. On the robot the servos make the torso buzz at ~15-20 Hz: the
+# gyro read 0.5-2.7 rad/s rms while standing still (training: 0.1), and the v7_10 / v7_11 policies
+# amplified it into a 16-18 Hz chatter (robot logs, 2026-10-24). In sim, a 4 Hz filter cut that chatter
+# from 41% to 8% of the action energy without changing clean walking. The gravity estimate and the yaw
+# use the raw gyro (filtering would only slow them down). None = off.
+GYRO_LOWPASS_HZ = 4.0
 
 # LSM9DS1 accelerometer + gyro (magnetometer is a separate device at 0x1C / 0x1E, not used)
 LSM_ADDRESSES = (0x6B, 0x6A)
@@ -126,6 +132,9 @@ class IMU:
         self._bias_samples, self._bias_until = [], 0.0
         self._lock = threading.Lock()
         self.filter = GravityFilter()
+        self.gyro_lowpass_hz = GYRO_LOWPASS_HZ
+        self._gyro_f = None
+        self.gyro_raw_rms = 0.0  # how much the raw gyro shakes (a vibration gauge for the page)
         threading.Thread(target=self._loop, daemon=True).start()
 
     def set_axes(self, axes):
@@ -219,7 +228,18 @@ class IMU:
         if g is not None:
             self._publish(g, gyro, self.filter.a_norm, None)
 
+    def _smooth_gyro(self, gyro, dt=1.0 / RATE_HZ):
+        self.gyro_raw_rms = math.sqrt(0.995 * self.gyro_raw_rms ** 2 + 0.005 * (gyro[0] ** 2 + gyro[1] ** 2))
+        if not self.gyro_lowpass_hz:
+            return list(gyro)
+        if self._gyro_f is None:
+            self._gyro_f = list(gyro)
+        a = dt / (1.0 / (2 * math.pi * self.gyro_lowpass_hz) + dt)
+        self._gyro_f = [f + a * (g - f) for f, g in zip(self._gyro_f, gyro)]
+        return list(self._gyro_f)
+
     def _publish(self, gravity, gyro, a_norm, calib):
-        self.state = {"gravity": list(gravity), "gyro": list(gyro), "yaw": self.filter.yaw, "accel_g": a_norm / 9.80665,
-                      "calib": calib, "biasing": time.monotonic() < self._bias_until,
+        gyro = self._smooth_gyro(gyro)
+        self.state = {"gravity": list(gravity), "gyro": gyro, "yaw": self.filter.yaw, "accel_g": a_norm / 9.80665,
+                      "gyro_raw_rms": self.gyro_raw_rms, "gyro_lowpass_hz": self.gyro_lowpass_hz, "calib": calib, "biasing": time.monotonic() < self._bias_until,
                       "gyro_bias": list(self.gyro_bias), "t": time.time(), "device": self.device.name}
