@@ -141,6 +141,36 @@ kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:
     </div>
   </div>
   <div class="card" style="grid-column:1/-1">
+    <div class="top"><h2>Personality</h2><span class="sub" id="pstatus"></span></div>
+    <div class="walk">
+      <div>
+        <div class="label" style="margin-top:8px">Gestures <span class="sub">(from Home; each one checked in the simulator)</span></div>
+        <div class="nudge" id="gbuttons" style="margin-top:6px"></div>
+        <div class="nudge" style="margin-top:8px">
+          <label class="sub">Dance BPM <input id="bpm" type="number" min="70" max="120" step="5" value="100"></label>
+          <button class="danger small" onclick="api('/gesture/stop')">Stop gesture</button>
+        </div>
+        <div class="nudge" style="margin-top:12px">
+          <button id="playful" onclick="api('/playful?on=' + (P && P.playful ? 0 : 1))">Playful mode: off</button>
+          <span class="sub">Standing at Home with nothing else going on: a small idle move or chirp every 10&ndash;25 s.</span>
+        </div>
+      </div>
+      <div>
+        <div class="label" style="margin-top:8px">Voice</div>
+        <div class="nudge" id="sbuttons" style="margin-top:6px"></div>
+        <div class="nudge" id="fbuttons" style="margin-top:6px"></div>
+        <div class="nudge" style="margin-top:8px">
+          <input id="saytext" type="text" placeholder="Say something (needs espeak-ng)" style="flex:1;min-width:0">
+          <button class="small" onclick="say()">Say</button>
+        </div>
+        <div class="nudge" style="margin-top:8px">
+          <label class="sub">Volume <input id="vol" type="range" min="0" max="1" step="0.05" style="width:140px" onchange="api('/volume?v=' + this.value)"></label>
+          <span class="sub" id="vstatus"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="grid-column:1/-1">
     <div class="top"><h2>Calibration</h2><span class="sub" id="calstate"></span></div>
     <ol class="steps">
       <li><b>Zero.</b> Relax all, hold both legs perfectly straight (a jig or a flat wall helps), then
@@ -455,12 +485,41 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Escape') api('/policy/stop');
 });
 
+// ---- personality ----
+let P = null, pBuilt = false;
+function personality() {
+  P = S.personality;
+  const V = P.voice;
+  if (!pBuilt) {
+    $('gbuttons').innerHTML = P.gestures.map(g =>
+      `<button class="small" title="${g.description}" onclick="gesture('${g.name}')">${g.label}</button>`).join('');
+    $('sbuttons').innerHTML = V.emotions.map(e =>
+      `<button class="small" onclick="api('/sound?emotion=${e}')">${e}</button>`).join('');
+    $('vol').value = V.volume;
+    pBuilt = true;
+  }
+  const files = V.files.map(f => `<button class="small" onclick="api('/sound?file=${encodeURIComponent(f)}')">${f.replace('.wav', '')}</button>`).join('');
+  if ($('fbuttons').dataset.n !== String(V.files.length)) { $('fbuttons').innerHTML = files; $('fbuttons').dataset.n = V.files.length; }
+  $('playful').textContent = 'Playful mode: ' + (P.playful ? 'on' : 'off');
+  $('playful').classList.toggle('on', P.playful);
+  $('pstatus').textContent = P.gesture ? 'playing ' + P.gesture : '';
+  $('vstatus').innerHTML = !V.backend ? '<span class="bad">no audio output found</span>'
+    : V.error ? `<span class="warn">${V.error}</span>` : V.playing ? 'playing ' + V.playing : `${V.backend}` + (V.tts ? ' + ' + V.tts : '');
+}
+function gesture(name) {
+  api('/gesture?name=' + name + (name === 'dance' ? '&bpm=' + $('bpm').value : ''));
+}
+function say() {
+  const text = $('saytext').value.trim();
+  if (text) api('/say?text=' + encodeURIComponent(text));
+}
+
 async function poll() {
   try {
     S = await (await fetch('/state')).json();
     if (!built) build();
     for (const [name, j] of Object.entries(S.joints)) updateJoint(name, j);
-    battery(); pi(); imu(); walker(); alerts(); camNote();
+    battery(); pi(); imu(); walker(); personality(); alerts(); camNote();
     $('calstate').textContent = S.zero_set ? 'Zero set' : 'Not calibrated';
     $('status').textContent = Date.now() < flashUntil ? flashText
       : S.message || `${Object.values(S.joints).filter(j => j.found).length} of 8 servos`;

@@ -43,6 +43,7 @@ class Walker:
         self.move_ms = 0              # servo move time per tick (0 = full speed, as in the simulator)
         self.last_link = time.monotonic()
         self.stats = {}
+        self.listener = None          # called with "start", "stop", "fall" or "lost" (personality sounds)
 
     # ---- from the page ----
     def heartbeat(self):
@@ -63,6 +64,15 @@ class Walker:
         r = self.robot
         if not r.cal.zero_set:
             return "not calibrated: set zero first"
+        pers = getattr(r, "personality", None)
+        if pers and pers.busy() and pers.idle_playing():
+            pers.stop()  # a playful-mode idle animation: the walk takes over
+            for _ in range(25):
+                if not pers.busy():
+                    break
+                time.sleep(0.02)
+        if pers and pers.busy():
+            return "a gesture is playing"
         if any(BY_NAME[n][1] not in r.bus_of for n in NAMES):
             return "not all 8 servos found"
         if any(r.locked(BY_NAME[n][1]) for n in NAMES):
@@ -86,13 +96,18 @@ class Walker:
         self.heartbeat()
         self.thread = threading.Thread(target=self._loop, daemon=True)
         self.thread.start()
+        if self.listener:
+            self.listener("start")
         return None
 
     def stop(self, why="stopped", relax=False):
+        was = self.running
         self.running = False
         self.status = why
         if relax:
             self.robot.relax()
+        if was and self.listener:
+            self.listener("fall" if "tilted" in why else "lost" if "connection" in why else "stop")
 
     # ---- the loop ----
     def _home(self, name):

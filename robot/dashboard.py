@@ -24,6 +24,7 @@ from robot import hiwonder
 from robot.camera import Camera
 from robot.imu import IMU, tilt_deg
 from robot.joints import BY_ID, BY_NAME, HOME, NAMES, STRAIGHT, Calibration
+from robot.personality import Personality
 from robot.walker import Walker
 
 PORT = 8000
@@ -48,6 +49,8 @@ class Robot:
         self.message = ""
         self.camera = Camera()
         self.walker = Walker(self)
+        self.personality = Personality(self)
+        self.walker.listener = self.personality.walker_event
         self.scan()
         self.imu = IMU(self.cal.imu_bus, self.cal.imu_axes)
         threading.Thread(target=self._pi_loop, daemon=True).start()
@@ -135,6 +138,7 @@ class Robot:
             fn(bus)
 
     def relax(self, name=None):
+        self.personality.stop()
         if self.walker.running:
             self.walker.stop("stopped: relaxed from the page")
         if name is None:
@@ -148,6 +152,7 @@ class Robot:
             self.servo[sid]["torque"] = False
 
     def stop(self):
+        self.personality.stop()
         self.walker.stop("stopped from the page")
         self.all_buses(lambda b: b.stop())
 
@@ -156,6 +161,8 @@ class Robot:
         sid = BY_NAME[name][1]
         if self.walker.running:
             return "the policy is running: stop it first"
+        if self.personality.busy():
+            return "a gesture is playing"
         if sid not in self.bus_of:
             return f"servo {sid} ({name}) not found"
         if self.locked(sid):
@@ -175,7 +182,7 @@ class Robot:
         return self.move(name, self.cal.joints[name].degrees(pos), 0)
 
     def pose(self, angles, ms):
-        errors = [e for e in (self.move(n, angles[n], ms) for n in NAMES) if e]
+        errors = dict.fromkeys(e for e in (self.move(n, angles[n], ms) for n in NAMES) if e)
         return "; ".join(errors) or None
 
     def boot(self):
@@ -183,6 +190,8 @@ class Robot:
         home angles sum to 0 on each leg)."""
         if self.walker.running:
             return "the policy is running: stop it first"
+        if self.personality.busy():
+            return "a gesture is playing"
 
         def run():
             self.message = "Boot: straightening the legs"
@@ -313,6 +322,7 @@ class Robot:
                           "fail_pct": 100 * self.imu.failures / self.imu.reads if self.imu.reads else None,
                           "read_ms": self.imu.read_ms},
             "walker": self.walker.state(),
+            "personality": self.personality.state(),
             "camera": {"available": Camera.available, "error": self.camera.error},
             "limits": {"servo_temp": SERVO_TEMP_LIMIT, "pi_temp": PI_TEMP_LIMIT},
         }
@@ -405,6 +415,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.result(robot.walker.set_command(float(q["vx"]), float(q["vy"]), float(q["wz"])))
             elif p == "/policy/move_ms":
                 robot.walker.move_ms = max(0, min(100, int(q["ms"])))
+                self.result()
+            elif p == "/gesture":
+                self.result(robot.personality.play(q["name"], bpm=q.get("bpm")))
+            elif p == "/gesture/stop":
+                robot.personality.stop()
+                self.result()
+            elif p == "/sound":
+                v = robot.personality.voice
+                if "file" in q:
+                    v.play_file(q["file"])
+                elif q.get("emotion") in v.state()["emotions"]:
+                    v.say(q["emotion"])
+                else:
+                    return self.reply(400)
+                self.result(v.error)
+            elif p == "/say":
+                robot.personality.voice.speak(q["text"])
+                self.result(robot.personality.voice.error)
+            elif p == "/volume":
+                robot.personality.voice.volume = max(0.0, min(1.0, float(q["v"])))
+                self.result()
+            elif p == "/playful":
+                robot.personality.playful = q.get("on") == "1"
+                robot.personality.last_activity = time.monotonic()
                 self.result()
             elif p == "/cal/zero_gyro":
                 robot.imu.zero_gyro()
