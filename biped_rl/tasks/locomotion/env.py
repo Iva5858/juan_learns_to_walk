@@ -10,6 +10,7 @@ randomization, pushes) and curricula. This class runs the simulation and calls t
 """
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 
 import gymnasium as gym
@@ -67,6 +68,7 @@ class DomainState:
     friction_scale: float = 1.0
     imu_tilt: np.ndarray = None
     gyro_bias: np.ndarray = None
+    vibration: tuple = None     # (rms per axis, Hz, phase per axis) of the torso buzz on the gyro
 
 
 @dataclass
@@ -127,6 +129,51 @@ class EpisodeState:
     timing_asym: float = 0.0    # latest left/right step-timing asymmetry
 
 
+CACHE_DIR = Path(__file__).resolve().parents[3] / "out" / "model_cache"
+
+
+def load_physics_model(path):
+    """The model without its visual-only meshes (no contacts), with every body's mass, centre of mass
+    and inertia set to what the full model computes (Juan's bodies get theirs from their geoms,
+    visual meshes included): identical physics, a fraction of the memory. The full model is compiled
+    only once per model version; its inertias are cached in out/model_cache/."""
+    path = Path(path)
+    stamp = max(f.stat().st_mtime_ns for f in path.parent.glob("*.xml"))
+    cache = CACHE_DIR / f"{path.stem}_{stamp}.npz"
+    if cache.exists():
+        c = np.load(cache)
+    else:
+        full = mujoco.MjModel.from_xml_path(str(path))
+        c = {"mass": full.body_mass.copy(), "ipos": full.body_ipos.copy(), "iquat": full.body_iquat.copy(),
+             "inertia": full.body_inertia.copy()}
+        del full
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_suffix(".tmp.npz")
+        np.savez(tmp, **c)
+        tmp.replace(cache)
+    spec = mujoco.MjSpec.from_file(str(path))
+    visual = [g for g in spec.geoms if g.type == mujoco.mjtGeom.mjGEOM_MESH and g.contype == 0 and g.conaffinity == 0]
+    if not visual:
+        return spec.compile()
+    for g in visual:
+        spec.delete(g)
+    used = {g.meshname for g in spec.geoms}
+    for mesh in list(spec.meshes):  # (unnamed meshes take their file's name)
+        if (mesh.name or Path(mesh.file).stem) not in used:
+            spec.delete(mesh)
+    spec.compiler.inertiafromgeom = mujoco.mjtInertiaFromGeom.mjINERTIAFROMGEOM_FALSE  # use the values below
+    for i, body in enumerate(spec.bodies):  # (spec.bodies is in body-id order, world first)
+        if i == 0:
+            continue
+        body.explicitinertial = True
+        body.mass, body.ipos, body.iquat, body.inertia = c["mass"][i], c["ipos"][i], c["iquat"][i], c["inertia"][i]
+    m = spec.compile()
+    for f in ("mass", "ipos", "iquat", "inertia"):
+        if not np.array_equal(getattr(m, "body_" + f), c[f]):
+            raise RuntimeError(f"physics-only model: body {f} differs from the full model")
+    return m
+
+
 class BipedEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 50}
 
@@ -134,7 +181,10 @@ class BipedEnv(gym.Env):
         if isinstance(config, dict):
             config = EnvConfig.from_dict(config)
         self.cfg = cfg = config or EnvConfig()
-        self.model = m = mujoco.MjModel.from_xml_path(resolve_model_path(cfg.robot.model_path))
+        # Without rendering, the visual-only CAD meshes are left out (~1.8 GB per environment for Juan;
+        # 18 training workers ran out of memory): same physics, see load_physics_model.
+        path = resolve_model_path(cfg.robot.model_path)
+        self.model = m = (mujoco.MjModel.from_xml_path(path) if render_mode else load_physics_model(path))
         self.data = mujoco.MjData(m)
         self.frame_skip = round(1.0 / (cfg.control_hz * m.opt.timestep))
         self.dt = self.frame_skip * m.opt.timestep
@@ -415,6 +465,7 @@ class BipedEnv(gym.Env):
             next_push=rng.uniform(*cfg.randomization.push_interval),
             last_action=np.zeros(self.nu), last_action2=np.zeros(self.nu), qd_sign=np.zeros(self.nu))
         self.curriculum.pending_push = None
+        self.gyro_filtered = None  # restart the robot-side gyro low-pass (observations.read_sensors)
         reading = observations.read_sensors(self)
         ep.sensor_buf.extend([reading] * ep.sensor_buf.maxlen)
         ep.action_buf.extend([ep.last_action] * cfg.history)

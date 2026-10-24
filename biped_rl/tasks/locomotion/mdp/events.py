@@ -29,6 +29,7 @@ def set_nominal_physics(env):
     env.domain.friction_scale = 1.0
     env.domain.imu_tilt = np.eye(3)
     env.domain.gyro_bias = np.zeros(3)
+    env.domain.vibration = None
 
 
 def randomize_physics(env):
@@ -85,6 +86,10 @@ def randomize_physics(env):
                                @ np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]]))
     if c.gyro_bias > 0:
         env.domain.gyro_bias = rng.uniform(-k * c.gyro_bias, k * c.gyro_bias, 3)
+    if c.gyro_vibration[1] > 0:  # (no draws when off: older runs keep their random stream)
+        rms = rng.uniform(*upto(c.gyro_vibration))
+        env.domain.vibration = (rms * np.array([0.4, 1.0, 0.4]), rng.uniform(*c.gyro_vibration_hz),
+                                rng.uniform(0, 2 * np.pi, 3))
 
 
 def vary_start_state(env):

@@ -214,6 +214,14 @@ def reversals(env, s, w):
     return w.reversals * s.reversals
 
 
+def stand_pose(env, s, w):
+    """Commanded to stand still: stand at home (feet flat, torso upright), not in a pose of its own.
+    Microduck's pose reward does the same, tight at zero command."""
+    if not env.command.standing:
+        return 0.0
+    return w.stand_pose * float(np.mean((s.q - env.robot.home_joint) ** 2))
+
+
 def stand_still(env, s, w):
     """Not moving while commanded to walk: 0 at >= half the commanded speed, 1 when stopped."""
     forward = env.command.forward
@@ -226,11 +234,12 @@ PENALTY_TERMS = (path_offset, orientation, ang_vel_xy, lin_vel_z, base_height, k
                  hip_roll, hip_roll_inward, action_rate, action_acc, joint_acc, servo_load,
                  servo_saturation, servo_overload, backdrive, impact, foot_slip, joint_limits,
                  feet_distance, energy, symmetry, posture_symmetry, step_timing, gait_mismatch,
-                 footstep, reversals, stand_still)
+                 footstep, reversals, stand_still, stand_pose)
 
 # Free while recovering (1 s after a shove, or the torso tilted > 8 deg): otherwise they punish
 # the quick extra step that catches a fall.
-PAUSED_WHILE_RECOVERING = ("symmetry", "posture_symmetry", "step_timing", "gait_mismatch", "footstep", "reversals")
+PAUSED_WHILE_RECOVERING = ("symmetry", "posture_symmetry", "step_timing", "gait_mismatch", "footstep", "reversals",
+                           "stand_pose")
 
 
 def compute(env, s):

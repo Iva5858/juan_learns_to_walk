@@ -117,6 +117,9 @@ class RewardWeights:
     hip_roll: float = 1.0            # hip roll away from 0 [rad^2] (no splayed, waddling legs)
     hip_roll_inward: float = 5.0     # per rad of inward roll: 0 deg inward is the goal, the 5 deg
                                      # joint limit is only a margin (5 deg inward costs ~0.44)
+    stand_pose: float = 20.0         # commanded to stand still: joints away from home, mean [rad^2].
+                                     # v7_10 stood ~7 deg off home, torso leaning back ~10 deg (~0.26
+                                     # here); 2 deg of balance correction costs ~0.02. 0 up to juan_v7_10
     # --- 3. smooth, hardware-safe motion (penalties) ---
     action_rate: float = 0.5         # 1st difference of actions
     action_acc: float = 0.2          # 2nd difference of actions (jerk)
@@ -183,6 +186,13 @@ class RandomizationConfig:
     # mounting, and gyro zero-rate offset. They matter more than its (small) white noise.
     imu_tilt_bias_deg: float = 2.5          # +- per axis (roll, pitch) of the gravity reading
     gyro_bias: float = 0.02                 # rad/s +- per axis
+    # Servo buzz shaking the torso (robot logs 2026-10-24: 0.5-2.7 rad/s rms on the gyro while standing,
+    # 15-20 Hz, mostly pitch): rms amplitude on pitch (roll and yaw 0.4x), frequency per episode.
+    gyro_vibration: tuple = (0.0, 1.2)      # rad/s rms
+    gyro_vibration_hz: tuple = (14.0, 20.0)
+    # The robot low-passes the gyro the policy sees (robot/imu.py GYRO_LOWPASS_HZ): the same here.
+    # Not a randomization: applied on the nominal robot too. 0 = off (runs up to juan_v7_11).
+    gyro_lowpass_hz: float = 4.0
     floor_tilt_deg: float = 3.0             # simulated slope via tilted gravity
     push_interval: tuple = (2.0, 4.0)       # s between random shoves
     push_velocity: float = 0.4              # m/s added to the torso: the cap (push_curriculum) or, without
@@ -232,10 +242,11 @@ LEGACY = {
               "mirror_pairs": (("l_hip_roll", "r_hip_roll", -1), ("l_hip_pitch", "r_hip_pitch", 1),
                                ("l_knee", "r_knee", 1), ("l_ankle", "r_ankle", 1)) + juan.MIRROR_PAIRS},
     "command": {"mode": "forward", "turn_in_place_prob": 0.0, "backward_prob": 0.0, "sideways_prob": 0.0},
-    "rewards": {"break_requires_load": 0.0},
+    "rewards": {"break_requires_load": 0.0, "stand_pose": 0.0},
     "randomization": {"total_mass_scale": (1.0, 1.0), "torso_mass_scale": (1.0, 1.0), "voltage_coupled": False,
                       "action_delay_steps": (0, 0), "obs_delay_steps": (0, 0), "backlash": (0.0, 0.0),
                       "joint_resolution": 0.0, "joint_offset": 0.0, "imu_tilt_bias_deg": 0.0, "gyro_bias": 0.0,
+                      "gyro_vibration": (0.0, 0.0), "gyro_lowpass_hz": 0.0,
                       "push_curriculum": False, "physics_curriculum": False,
                       "reset_joint_scale": (1.0, 1.0), "reset_lin_vel": 0.0, "reset_ang_vel": 0.0},
 }

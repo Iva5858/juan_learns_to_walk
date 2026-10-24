@@ -88,7 +88,7 @@ def export(run, out):
     def sensors():
         d, R = env.data, env.root_rot()
         return {"q": d.qpos[env.robot.qpos_idx].copy(), "qd": d.qvel[env.robot.dof_idx].copy(),
-                "gravity": env.gravity_body(), "gyro": d.qvel[3:6].copy(), "yaw": float(np.arctan2(R[1, 0], R[0, 0]))}
+                "gravity": env.gravity_body(), "gyro": env.gyro_reading.copy(), "yaw": float(np.arctan2(R[1, 0], R[0, 0]))}
 
     ctrl.start(sensors(), phase=env.command.phase)
     obs_err = act_err = 0.0

@@ -25,7 +25,7 @@ class TrainingDashboard(BaseCallback):
     PENALTY_GROUPS = {
         "path": ("path_offset", "stand_still"),
         "posture": ("orientation", "ang_vel_xy", "lin_vel_z", "base_height", "knee_hyperextension",
-                    "hip_roll", "hip_roll_inward"),
+                    "hip_roll", "hip_roll_inward", "stand_pose"),
         "smoothness": ("action_rate", "action_acc", "joint_acc", "reversals"),
         "servo_protection": ("servo_load", "servo_saturation", "servo_overload", "backdrive", "energy",
                              "joint_limits"),

@@ -23,8 +23,7 @@ def read_sensors(env):
     d, c, rng, robot = env.data, env.cfg.randomization, env.np_random, env.robot
     noisy = c.enabled
     noise = lambda scale, n: rng.normal(0, scale, n) if noisy else 0.0
-    parts = [env.domain.imu_tilt @ env.gravity_body() + noise(c.noise_gravity, 3),
-             d.qvel[3:6] + env.domain.gyro_bias + noise(c.noise_gyro, 3)]  # free-joint ang. vel. is in body frame
+    parts = [env.domain.imu_tilt @ env.gravity_body() + noise(c.noise_gravity, 3), gyro_seen(env, noise)]
     if env.cfg.robot.joint_feedback:
         q = d.qpos[robot.qpos_idx] - env.servo.joint_offset  # what a miscalibrated servo reports
         if noisy and c.joint_resolution > 0:
@@ -32,6 +31,27 @@ def read_sensors(env):
         parts += [q - robot.home_joint + noise(c.noise_joint_pos, env.nu),
                   0.1 * (d.qvel[robot.dof_idx] + noise(c.noise_joint_vel, env.nu))]
     return np.concatenate(parts)
+
+
+def gyro_seen(env, noise):
+    """The gyro as the robot's policy gets it: torso rate (the free joint's angular velocity is in the
+    body frame) + bias + noise + servo buzz, then the robot's low-pass (robot/imu.py)."""
+    c = env.cfg.randomization
+    g = env.data.qvel[3:6] + env.domain.gyro_bias + noise(c.noise_gyro, 3)
+    vib = env.domain.vibration
+    if vib is not None and c.enabled:
+        rms, hz, phase = vib
+        g = g + np.sqrt(2) * rms * np.sin(2 * np.pi * hz * env.episode.t + phase)
+    if c.gyro_lowpass_hz > 0:
+        prev = getattr(env, "gyro_filtered", None)
+        if prev is None:
+            env.gyro_filtered = np.array(g, dtype=float)
+        else:
+            a = env.dt / (1.0 / (2 * np.pi * c.gyro_lowpass_hz) + env.dt)
+            env.gyro_filtered = prev + a * (g - prev)
+        g = env.gyro_filtered.copy()
+    env.gyro_reading = np.array(g, dtype=float)  # (what the robot controller would be fed; export check)
+    return g
 
 
 def history_frames(env):
