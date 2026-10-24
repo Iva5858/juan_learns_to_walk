@@ -34,6 +34,16 @@ def policies():
     return sorted(f[:-4] for f in os.listdir(POLICY_DIR) if f.endswith(".npz")) if os.path.isdir(POLICY_DIR) else []
 
 
+def default_policy():
+    """The recommended policy, preselected on the page: robot/policies/default.txt (one name)."""
+    try:
+        with open(os.path.join(POLICY_DIR, "default.txt")) as f:
+            name = f.read().strip()
+        return name if name in policies() else None
+    except OSError:
+        return None
+
+
 class Walker:
     def __init__(self, robot):
         self.robot = robot
@@ -204,7 +214,7 @@ class Walker:
 
     def state(self):
         return {"running": self.running, "status": self.status, "policy": self.policy_name,
-                "policies": policies(), "move_ms": self.move_ms, **self.stats,
+                "policies": policies(), "default": default_policy(), "move_ms": self.move_ms, **self.stats,
                 "ranges": None if self.ctrl is None else {k: np.asarray(self.ctrl.policy.meta[k]).tolist()
                                                           for k in ("forward_range", "lateral_range", "yaw_rate_range")}}
 

@@ -443,8 +443,12 @@ const STEP = [0.05, 0.05, 0.15];   // m/s forward, m/s sideways, rad/s turn per 
 function walker() {
   W = S.walker;
   const sel = $('wpolicy');
-  if (sel.options.length !== W.policies.length) sel.innerHTML = W.policies.map(p => `<option>${p}</option>`).join('');
-  if (W.policy && !W.running) sel.value = W.policy;
+  if (sel.options.length !== W.policies.length) {
+    // (Re)filled only when the list changes, so a choice made on the page sticks.
+    sel.innerHTML = W.policies.map(p => `<option>${p}</option>`).join('');
+    sel.value = W.policy || W.default || W.policies[W.policies.length - 1];
+  }
+  if (W.running) sel.value = W.policy;
   $('wstart').disabled = W.running || !W.policies.length;
   sel.disabled = W.running;
   $('wms').value = W.move_ms;
