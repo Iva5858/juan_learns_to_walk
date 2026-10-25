@@ -161,7 +161,8 @@ class RandomizationConfig:
     joint_offset: float = 0.03              # rad: per-servo zero calibration error (+-1.7 deg)
     # --- delays. A new target applies `latency` into a control step, then `action_delay_steps` whole
     # 20 ms steps later: 25-59 ms in all (the servo starts moving 24-28 ms after a command, and reading
-    # one leg's 4 servos takes ~15 ms). The real robot measures 70-90 ms (EnvConfig.use_measured_servos).
+    # 4 servos takes ~15 ms, all 8 on the one bus about twice that). The real robot measures 70-90 ms
+    # (EnvConfig.use_measured_servos).
     latency: tuple = (0.005, 0.019)         # s
     action_delay_steps: tuple = (1, 2)
     obs_delay_steps: tuple = (0, 1)         # IMU and joint readings are this many steps old

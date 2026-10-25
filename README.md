@@ -8,7 +8,7 @@ Reinforcement learning for **Juan**, a 43 cm, 8-servo biped. The policy is train
 |---|---|
 | Size, weight | 43 cm tall, ~2 kg |
 | Legs | 4 joints each: hip roll, hip pitch, knee, ankle |
-| Servos | 8 × Hiwonder HTD-35H serial bus servos (3.4 Nm, 5.8 rad/s at 11.1 V), one BusLinker USB board per leg |
+| Servos | 8 × Hiwonder HTD-35H serial bus servos (3.4 Nm, 5.8 rad/s at 11.1 V), all on one BusLinker USB board |
 | Computer | Raspberry Pi 4, policy at 50 Hz |
 | Sensors | LSM9DS1 IMU (accelerometer + gyro), servo angle readback, Pi camera |
 | Power | 3S LiPo for the servos, a separate pack for the Pi |

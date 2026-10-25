@@ -56,9 +56,9 @@ def system():
            "" if "dialout" in groups.split() else "sudo usermod -aG dialout $USER, then log out and in")
     usb = run(["lsusb"]) or ""
     n = usb.count("1a86:7523")
-    report("PASS" if n == 2 else "FAIL", "BusLinkers (CH340, 1a86:7523) on USB", f"{n} found, expected 2")
+    report("PASS" if n >= 1 else "FAIL", "BusLinker (CH340, 1a86:7523) on USB", f"{n} found")
     ports = sorted(glob.glob("/dev/ttyUSB*")) + sorted(glob.glob("/dev/ttyACM*"))
-    report("PASS" if len(ports) == 2 else "FAIL", "serial ports", ", ".join(ports) or "none")
+    report("PASS" if len(ports) == n else "WARN" if ports else "FAIL", "serial ports", ", ".join(ports) or "none")
     i2c = sorted(glob.glob("/dev/i2c-*"))
     report("PASS" if i2c else "FAIL", "I2C buses", ", ".join(i2c) or "none: enable I2C (docs/bringup.md, step 1.2)")
     flags = pi_health.throttle_flags()
@@ -133,7 +133,7 @@ def servos(ports):
 
 
 def timing(buses):
-    print("\n3. Bus timing (the control loop's budget is 20 ms)")
+    print("\n3. Bus timing (the walker uses the latest reading; a full pass adds to the delay the policy sees)")
 
     def passes(bus, n, out):
         times, fails = [], 0
@@ -145,7 +145,7 @@ def timing(buses):
             times.append((time.perf_counter() - t0) * 1000)
         out[bus.port] = (times, fails, n * len(bus.ids))
 
-    for parallel in (False, True):
+    for parallel in (False, True) if len(buses) > 1 else (False,):
         out = {}
         if parallel:
             th = [threading.Thread(target=passes, args=(b, 300, out)) for b in buses]
@@ -155,10 +155,12 @@ def timing(buses):
             for b in buses:
                 passes(b, 300, out)
         for port, (times, fails, reads) in out.items():
+            n = reads // 300
             p99 = pct(times, 99)
-            status = "PASS" if p99 < 17 and fails == 0 else "WARN" if p99 < 20 else "FAIL"
-            report(status, f"{'both buses at once' if parallel else 'alone'}, {port}",
-                   f"read 4 positions: median {statistics.median(times):.1f} ms, 99% {p99:.1f}, max {max(times):.1f}; "
+            per_servo = p99 / max(n, 1)  # ~4 ms per servo read is normal
+            status = "PASS" if per_servo < 4.5 and fails == 0 else "WARN" if per_servo < 6 else "FAIL"
+            report(status, f"{'all buses at once' if parallel else 'alone'}, {port}",
+                   f"read {n} positions: median {statistics.median(times):.1f} ms, 99% {p99:.1f}, max {max(times):.1f}; "
                    f"failed {fails}/{reads}")
 
 

@@ -3,7 +3,7 @@ message: "If you use this software, the robot design or the trained policies, pl
 title: "Juan learns to walk: reinforcement learning for a small servo-driven biped"
 authors:
   - given-names: Isaac
-    family-names: Velez Aguirre
+    family-names: Velez
 type: software
 license: Apache-2.0
 date-released: 2026-10-25
