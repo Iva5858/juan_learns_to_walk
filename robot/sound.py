@@ -10,7 +10,6 @@ for previewing). Without an audio device it quietly does nothing. Sounds queue, 
     python3 -m robot.sound --save out/    # write them as .wav files
 """
 import io
-import math
 import os
 import queue
 import random

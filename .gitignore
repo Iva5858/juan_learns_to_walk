@@ -1,26 +1,25 @@
 # Python
-.venv/
+.venv
 .venv_old_machine/
 __pycache__/
 *.pyc
+*.egg-info/
 
 # Secrets (Onshape API keys) - never commit
 .env
 .env.*
 
-# Training outputs: keep only each run's config and report
-/runs/*
-!/runs/*/
-/runs/*/*
-!/runs/*/config.json
-!/runs/*/report.txt
-
-# macOS
-.DS_Store
+# Training outputs (shared policies go in checkpoints/ and robot/policies/)
+runs/
 out/
-
-# Editable install metadata
-*.egg-info/
+videos/
 
 # Robot run logs (copy the ones you want to compare with the simulator)
 robot/logs/
+
+# Local notes, kept out of the repository
+reports/
+research_notes/
+
+# macOS
+.DS_Store

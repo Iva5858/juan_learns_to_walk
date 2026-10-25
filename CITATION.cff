@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, the robot design or the trained policies, please cite it as below."
+title: "Juan learns to walk: reinforcement learning for a small servo-driven biped"
+authors:
+  - given-names: Isaac
+    family-names: Velez Aguirre
+type: software
+license: Apache-2.0
+date-released: 2026-10-25
+version: 0.8.0
+keywords:
+  - reinforcement learning
+  - bipedal locomotion
+  - sim-to-real
+  - MuJoCo
+  - hobby servos

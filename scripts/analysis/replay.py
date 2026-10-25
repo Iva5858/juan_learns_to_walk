@@ -9,21 +9,19 @@ copy drifts away within a second or two.)
 Run over a grid of servo models and delays, it also tells which ones match the real robot best:
 system identification from walking data instead of a bench test.
 
-    python scripts/analysis/replay.py robot/logs/2026-10-24_125742.348_juan_v7_11_upright.npz
+    python scripts/analysis/replay.py robot/logs/<log>.npz
     python scripts/analysis/replay.py <log> --plot      # + out/replay/<log>.png: real vs best vs training model
 """
 import argparse
 import itertools
 import math
-import sys
 from pathlib import Path
 
 import mujoco
 import numpy as np
 
-PROJECT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT))
-from biped_rl.tasks.locomotion import BipedEnv, EnvConfig  # noqa: E402
+from biped_rl.robots import PROJECT
+from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 
 # Servo models to compare: (label, no-load speed rad/s, kp Nm/rad, kd)
 SERVOS = [("original 5.8/15", 5.8, 15.0, 0.2), ("bench fit 3.0/6", 3.0, 6.0, 0.2), ("stiff 5.8/25", 5.8, 25.0, 0.3),
@@ -73,19 +71,20 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("log")
     p.add_argument("--window", type=float, default=1.0, help="seconds per replayed window")
-    p.add_argument("--config", default="runs/juan_v7_12b_pushes", help="run whose robot model to use")
+    p.add_argument("--config", help="run whose robot model to use (default: the current one)")
     p.add_argument("--plot", action="store_true")
     a = p.parse_args()
     log = dict(np.load(a.log))
     names = [str(n) for n in log["joints"]]
-    cfg = EnvConfig.from_dict(__import__("json").loads((PROJECT / a.config / "config.json").read_text()))
+    cfg = EnvConfig.load(a.config) if a.config else EnvConfig()
     cfg.randomization.enabled = False
     env = BipedEnv(cfg.to_dict())
     n = int(a.window / env.dt)
     T = len(log["t"])
     starts = list(range(5, T - n - 1, n))
     print(f"{Path(a.log).name}: {T} steps ({T * env.dt:.0f} s), {len(starts)} windows of {a.window:.1f} s")
-    print(f"{'servo model':18s} {'delay':>5s} | joint error vs real, rms deg (all | per joint: {' '.join(x.split('_', 1)[1][:5] for x in names[:4])} L/R)"
+    short = " ".join(x.split("_", 1)[1][:5] for x in names[:4])
+    print(f"{'servo model':18s} {'delay':>5s} | joint error vs real, rms deg (all | per joint: {short} L/R)"
           f" | tilt error deg")
     results = []
     for servo, delay in itertools.product(SERVOS, DELAYS):

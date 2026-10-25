@@ -59,7 +59,7 @@ def system():
     ports = sorted(glob.glob("/dev/ttyUSB*")) + sorted(glob.glob("/dev/ttyACM*"))
     report("PASS" if len(ports) == 2 else "FAIL", "serial ports", ", ".join(ports) or "none")
     i2c = sorted(glob.glob("/dev/i2c-*"))
-    report("PASS" if i2c else "FAIL", "I2C buses", ", ".join(i2c) or "none: enable I2C (see bno055.py)")
+    report("PASS" if i2c else "FAIL", "I2C buses", ", ".join(i2c) or "none: enable I2C (docs/bringup.md, step 1.2)")
     out = run(["vcgencmd", "get_throttled"])
     if out:
         flags = int(out.strip().split("=")[1], 16)
@@ -220,7 +220,7 @@ def camera():
         report("FAIL", "picamera2", "sudo apt install python3-picamera2")
         return
     cam, frames, t0 = Camera(), 0, time.monotonic()
-    for frame in cam.stream():
+    for _ in cam.stream():
         frames += 1
         if time.monotonic() - t0 > 3:
             break

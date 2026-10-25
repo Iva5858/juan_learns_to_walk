@@ -10,8 +10,6 @@ def fell(env, s):
 def broke(env, s):
     """A hardware limit was crossed (the real robot could break): a landing above break_impact x
     body weight, or a joint forced past break_joint_speed x servo speed while the servo pushes back
-    with more than break_requires_load x stall torque (0: any such over-speed, runs up to v6)."""
+    with more than break_requires_load x stall torque."""
     w = env.cfg.rewards
-    impact_bw = s.peak_force.max() / env.robot.weight
-    overspeed = s.loaded_overspeed if w.break_requires_load > 0 else s.peak_speed_ratio > w.break_joint_speed
-    return bool(impact_bw > w.break_impact or overspeed)
+    return bool(s.peak_force.max() / env.robot.weight > w.break_impact or s.loaded_overspeed)

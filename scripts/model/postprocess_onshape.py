@@ -14,7 +14,7 @@ What it does:
   * removes any coupling between joints (Onshape gear relations) and gives all 8 joints a servo
   * foot soles = flat boxes + rubber pads (stable contact instead of mesh hulls), capsules on
     thighs and shins (legs cannot pass through each other; knee on the floor = a fall)
-  * IMU site at the BNO055, home keyframe (crouched, feet flat, just touching the floor)
+  * IMU site, home keyframe (crouched, feet flat, just touching the floor)
 """
 import argparse
 import re
@@ -63,7 +63,8 @@ MASS_RULES = [
     (r"^m2_x_5_horn_screw", 10 / 64, "each"),
 ]
 # Thin / hollow parts: mass on the surface ("shell"); dense parts: solid convex hull ("convex")
-SHELL_PARTS = r"^(\d[ab]?_|debug_board_holder|circuit_board|lead|servo_bus_lead|trunk_lead|camera_ribbon|imu_wires|usb_c_power|usb_cable|motor_battery_leads|pi_battery_leads|adafruit_bno055|lm2596)"
+SHELL_PARTS = (r"^(\d[ab]?_|debug_board_holder|circuit_board|lead|servo_bus_lead|trunk_lead|camera_ribbon|imu_wires|"
+               r"usb_c_power|usb_cable|motor_battery_leads|pi_battery_leads|adafruit_bno055|lm2596)")
 
 ROLL = ("left_hip_roll", "right_hip_roll")
 PITCH = ("left_hip_pitch", "left_knee", "left_ankle", "right_hip_pitch", "right_knee", "right_ankle")
@@ -129,43 +130,6 @@ def sole_bottom(model, data, foot):
     return float((data.geom_xpos[g] + v @ data.geom_xmat[g].reshape(3, 3).T)[:, 2].min())
 
 
-def write_training_model(tree, model, export_dir):
-    """Same physics without the ~370 visual meshes (MuJoCo repositions every geom each step):
-    each link's BoM-derived mass/inertia is written explicitly, only collision shapes are kept.
-    Training uses rl_scene_train.xml; videos and the viewer use rl_scene.xml."""
-    import copy
-    t = copy.deepcopy(tree)
-    root = t.getroot()
-    root.find("compiler").set("inertiafromgeom", "false")
-    for body in root.iter("body"):
-        b = model.body(body.get("name"))
-        for g in [g for g in body.findall("geom") if g.get("class") == "visual"]:
-            body.remove(g)
-        quat = model.body_iquat[b.id]
-        inertial = ET.Element("inertial", pos=fmt(model.body_ipos[b.id]), quat=fmt(quat),
-                              mass=f"{model.body_mass[b.id]:.6g}", diaginertia=fmt(model.body_inertia[b.id]))
-        body.insert(1, inertial)
-        for g in body.findall("geom"):  # mass now lives in <inertial>
-            g.set("mass", "0")
-            g.attrib.pop("density", None)
-    used = {g.get("mesh") for g in root.iter("geom") if g.get("mesh")}
-    asset = root.find("asset")
-    for mesh in list(asset.iter("mesh")):
-        name = mesh.get("name") or Path(mesh.get("file", "")).stem
-        if name not in used:
-            asset.remove(mesh)
-    for mat in list(asset.iter("material")):
-        asset.remove(mat)
-    for g in root.iter("geom"):
-        g.attrib.pop("material", None)
-    t.write(export_dir / "rl_robot_train.xml")
-    scene = (export_dir / "scene.xml").read_text().replace('file="robot.xml"', 'file="rl_robot_train.xml"')
-    (export_dir / "rl_scene_train.xml").write_text(scene)
-    m2 = mujoco.MjModel.from_xml_path(str(export_dir / "rl_scene_train.xml"))
-    assert np.allclose(m2.body_mass, model.body_mass, atol=1e-6), "training model masses differ"
-    print(f"training model: {m2.ngeom} geoms (full model {model.ngeom}), same masses and inertias")
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("export_dir", type=Path)
@@ -202,7 +166,7 @@ def main():
             body.remove(inertial)
     matches = defaultdict(list)
     unmatched = []
-    for part, geom, body in geoms:
+    for part, geom, _ in geoms:
         if geom.get("class") == "collision":
             geom.set("density", "0")  # collision copies carry no mass (the visual copy does)
             continue
@@ -347,7 +311,6 @@ def main():
     tmp.unlink(missing_ok=True)
     scene = (args.export_dir / "scene.xml").read_text().replace('file="robot.xml"', 'file="rl_robot.xml"')
     (args.export_dir / "rl_scene.xml").write_text(scene)
-    write_training_model(tree, model, args.export_dir)
 
     # ---- report
     data = mujoco.MjData(model)

@@ -1,5 +1,5 @@
 """Check every gesture (robot/gestures.py) on the simulated Juan before it runs on the robot: played
-from home with the servos measured on the bench (the v7_10 robot), nominal and randomized physics.
+from home with the measured real servos (EnvConfig.use_measured_servos), nominal and randomized physics.
 
     python scripts/check_gestures.py                 # all gestures, table + verdicts
     python scripts/check_gestures.py --video         # also out/gestures/<name>.mp4 (nominal robot)
@@ -9,20 +9,15 @@ Passes when: never falls, torso tilt under 15 deg (gestures.MAX_TILT for ones th
 including the ~3-6 deg the robot leans standing at home), servo torque under 90% of stall.
 """
 import argparse
-import json
-import sys
-from pathlib import Path
 
 import mujoco
 import numpy as np
 
-PROJECT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT))  # the robot/ package isn't installed
-from biped_rl.tasks.locomotion import BipedEnv, EnvConfig  # noqa: E402
-from robot import gestures as G  # noqa: E402
-from robot.joints import NAMES  # noqa: E402
+from biped_rl.robots import PROJECT
+from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
+from robot import gestures as G
+from robot.joints import NAMES
 
-ROBOT_RUN = PROJECT / "runs" / "juan_v7_10a_real_servos"  # measured servos: 3.0 rad/s, kp 6
 MAX_TILT, MAX_TORQUE = 15.0, 0.9
 
 
@@ -66,8 +61,9 @@ def main():
     p.add_argument("--video", action="store_true")
     p.add_argument("--seeds", type=int, default=6)
     a = p.parse_args()
-    base = EnvConfig.from_dict(json.loads((ROBOT_RUN / "config.json").read_text()))
+    base = EnvConfig().use_measured_servos()
     base.randomization.push_velocity = 0.0
+    base.randomization.physics_curriculum = False
     names = a.names or list(G.ALL)
     print(f"{'gesture':14s} {'s':>4s}  {'falls':>6s} {'max tilt':>9s} {'torque/stall':>12s} {'speed/max':>9s}  verdict")
     ok_all = True

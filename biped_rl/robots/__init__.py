@@ -22,11 +22,3 @@ def resolve_model_path(path):
             return str(candidate)
     raise FileNotFoundError(f"robot model not found: {path} (also looked inside {PROJECT})")
 
-
-def portable_model_path(path):
-    """Path to save in a run's config.json: relative to the project when it is inside it."""
-    p = Path(path).resolve()
-    try:
-        return str(p.relative_to(PROJECT))
-    except ValueError:
-        return str(p)

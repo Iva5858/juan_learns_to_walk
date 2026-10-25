@@ -42,13 +42,7 @@ def feet_clearance(env, s, w):
         s.swing * np.exp(-(((env.episode.clearance - c.swing_height) / (0.5 * c.swing_height)) ** 2)))
 
 
-def flight(env, s, w):
-    """Both feet off the ground while moving at >= half the command (running)."""
-    forward = env.command.forward
-    return w.flight * float(env.episode.contact.sum() == 0 and s.vx > 0.5 * forward > 0)
-
-
-TASK_TERMS = (tracking_vel, tracking_lat_yaw, heading, gait_contact, feet_clearance, flight)
+TASK_TERMS = (tracking_vel, tracking_lat_yaw, heading, gait_contact, feet_clearance)
 
 
 # --------------------------------------------------------------------- penalties
@@ -178,23 +172,6 @@ def symmetry(env, s, w):
     return w.symmetry * asym
 
 
-def posture_symmetry(env, s, w):
-    """Left vs right leg AVERAGE angle over the last stride (mirrored) [rad^2]: a leg held
-    straighter or more bent all the time is a limp too."""
-    robot, hist = env.robot, env.episode.q_hist
-    steps = max(_stride(env), 1)
-    if len(robot.mirror_l) and len(hist) >= steps:
-        recent = np.array(list(hist)[-steps:])
-        gap = (recent[:, robot.mirror_l] - robot.mirror_sign * recent[:, robot.mirror_r]).mean(axis=0)
-        return w.posture_symmetry * float(np.mean(gap ** 2))
-    return 0.0
-
-
-def step_timing(env, s, w):
-    """|left->right - right->left interval| / their sum, charged every step: a lopsided rhythm."""
-    return w.step_timing * env.episode.timing_asym
-
-
 def gait_mismatch(env, s, w):
     """Share of feet on or off the ground against the gait clock."""
     return w.gait_mismatch * float(np.mean(env.episode.contact != ~s.swing))
@@ -233,13 +210,11 @@ def stand_still(env, s, w):
 PENALTY_TERMS = (path_offset, orientation, ang_vel_xy, lin_vel_z, base_height, knee_hyperextension,
                  hip_roll, hip_roll_inward, action_rate, action_acc, joint_acc, servo_load,
                  servo_saturation, servo_overload, backdrive, impact, foot_slip, joint_limits,
-                 feet_distance, energy, symmetry, posture_symmetry, step_timing, gait_mismatch,
-                 footstep, reversals, stand_still, stand_pose)
+                 feet_distance, energy, symmetry, gait_mismatch, footstep, reversals, stand_still, stand_pose)
 
 # Free while recovering (1 s after a shove, or the torso tilted > 8 deg): otherwise they punish
 # the quick extra step that catches a fall.
-PAUSED_WHILE_RECOVERING = ("symmetry", "posture_symmetry", "step_timing", "gait_mismatch", "footstep", "reversals",
-                           "stand_pose")
+PAUSED_WHILE_RECOVERING = ("symmetry", "gait_mismatch", "footstep", "reversals", "stand_pose")
 
 
 def compute(env, s):
@@ -247,9 +222,9 @@ def compute(env, s):
     (reward without the termination penalty, task terms, penalties, penalty sum)."""
     w = env.cfg.rewards
     # How well the speed command is met, in [0, 1]: a narrow kernel for precision plus a broad one
-    # so that creeping forward already beats standing still. Omni mode: sideways speed counts too.
+    # so that creeping forward already beats standing still. Sideways speed counts too.
     err = s.vx - s.cmd[0]
-    err2 = err ** 2 + ((s.vy - s.cmd[1]) ** 2 if env.omni else 0.0)
+    err2 = err ** 2 + (s.vy - s.cmd[1]) ** 2
     share = w.tracking_broad_share
     s.tracking = ((1 - share) * np.exp(-err2 / w.tracking_sigma2)
                   + share * np.exp(-err2 / w.tracking_broad_sigma2))

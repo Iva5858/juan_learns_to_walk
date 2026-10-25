@@ -1,25 +1,18 @@
 """How a policy stands and walks straight, run through the robot's own controller (robot/policy.py)
-on the robot with the servos measured on the bench:
+on the simulated robot with the measured real servos (EnvConfig.use_measured_servos):
   * standing still: torso lean, joint offset from home, and the jump when it takes over from home
   * straight walking at 0.15 m/s for 10 s: forward / sideways distance, turning
 
-    python scripts/analysis/standing.py juan_v7_10a_real_servos juan_v7_11_upright
-(names of exported policies in robot/policies/)
+    python scripts/analysis/standing.py juan_v7_12b_pushes_best      # names of policies in robot/policies/
 """
 import argparse
-import json
 import math
-import sys
-from pathlib import Path
 
 import numpy as np
 
-PROJECT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT))
-from biped_rl.tasks.locomotion import BipedEnv, EnvConfig  # noqa: E402
-from robot.policy import Controller, Policy  # noqa: E402
-
-ROBOT_RUN = PROJECT / "runs" / "juan_v7_10a_real_servos"  # measured servos: 3.0 rad/s, kp 6
+from biped_rl.robots import PROJECT
+from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
+from robot.policy import Controller, Policy
 
 
 def episode(policy, cfg, seed, command, seconds):
@@ -60,8 +53,9 @@ def main():
     p.add_argument("policies", nargs="+")
     p.add_argument("--seeds", type=int, default=6)
     a = p.parse_args()
-    base = EnvConfig.from_dict(json.loads((ROBOT_RUN / "config.json").read_text()))
+    base = EnvConfig().use_measured_servos()
     base.randomization.push_velocity = 0.0
+    base.randomization.physics_curriculum = False
     print(f"{'policy':38s} {'physics':10s} | standing: {'lean fwd':>8s} {'off home':>8s} {'jump':>6s} | "
           f"walk 0.15 m/s, 10 s: {'fwd m':>6s} {'left m':>7s} {'turn':>6s} | falls")
     for name in a.policies:

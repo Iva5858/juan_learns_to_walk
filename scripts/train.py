@@ -1,8 +1,8 @@
 """Train a walking policy with PPO (Stable-Baselines3). Run from the project folder.
 
-    ./scripts/train_v7.sh                                      # the current recipe (see README)
     python scripts/train.py --run-name test --stage walk       # one stage, from scratch
-    python scripts/train.py --run-name next --stage pushes --resume runs/juan_v7_4_pushes
+    python scripts/train.py --run-name next --stage pushes --resume checkpoints/juan_v7_12b_pushes_best \
+        --timesteps 30000000 --lr 1e-4 --reward heading=2.0        # fine-tune, with a changed setting
     tensorboard --logdir runs                                  # charts: see TrainingDashboard
 
 Every setting is in biped_rl/tasks/locomotion/env_cfg.py (task) and biped_rl/training/ppo.py
@@ -21,9 +21,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
-from biped_rl.robots import portable_model_path
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
-from biped_rl.tasks.locomotion.env_cfg import RewardWeights, RobotConfig
 from biped_rl.training.callbacks import SaveVecNormalize, TrainingDashboard, VideoRecorder
 from biped_rl.training.ppo import n_steps_for, new_model
 from biped_rl.training.stages import STAGES, apply_stage, load_curriculum, save_curriculum
@@ -38,23 +36,16 @@ def parse_value(text):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--run-name", default="walk_v1")
-    p.add_argument("--model", help="MJCF of the robot (default: Juan)")
-    p.add_argument("--feet", nargs=2, help="left and right foot body names")
+    p.add_argument("--run-name", required=True)
     p.add_argument("--timesteps", type=int, default=30_000_000)
     p.add_argument("--n-envs", type=int, default=2 * os.cpu_count(),
                    help="simulation workers (default 2 x cores: 36 on this Mac was 43%% faster than 18)")
-    p.add_argument("--max-speed", type=float, help="upper end of the speed command [m/s]")
-    p.add_argument("--swing-ratio", type=float, help=">0.5 gives a flight phase (running)")
-    p.add_argument("--no-joint-feedback", action="store_true", help="servos cannot report their angle")
     p.add_argument("--resume", help="run directory to continue from (fine-tuning / curriculum)")
     p.add_argument("--min-std", type=float, default=0.1,
                    help="with --resume and --stage: raise the policy's exploration noise to at least this "
                         "(it shrinks during training; a new stage needs room to try new movements)")
     p.add_argument("--stage", choices=STAGES, help="training stage (see apply_stage); with --resume for "
                    "all but the first")
-    p.add_argument("--new-rewards", action="store_true",
-                   help="with --resume: use the reward weights and robot settings in the current code")
     p.add_argument("--video-every", type=int, default=1_000_000, help="steps between walking clips")
     p.add_argument("--log-details", action="store_true",
                    help="also chart every single penalty term (for reward tuning)")
@@ -72,23 +63,7 @@ def main():
 
     run_dir = Path("runs") / args.run_name
     run_dir.mkdir(parents=True, exist_ok=True)
-    if args.resume:
-        cfg = EnvConfig.from_dict(json.loads((Path(args.resume) / "config.json").read_text()))
-    else:
-        cfg = EnvConfig()
-    if args.resume and args.new_rewards:
-        cfg.rewards = RewardWeights()
-        cfg.robot = RobotConfig(model_path=cfg.robot.model_path, foot_bodies=cfg.robot.foot_bodies)
-    if args.model:
-        cfg.robot.model_path = portable_model_path(args.model)
-    if args.feet:
-        cfg.robot.foot_bodies = tuple(args.feet)
-    if args.max_speed is not None:
-        cfg.command.speed_range = (cfg.command.speed_range[0], args.max_speed)
-    if args.swing_ratio is not None:
-        cfg.command.swing_ratio = args.swing_ratio
-    if args.no_joint_feedback:
-        cfg.robot.joint_feedback = False
+    cfg = EnvConfig.load(args.resume) if args.resume else EnvConfig()
     if args.stage:
         apply_stage(cfg, args.stage)
     # Overrides last, so the stage's settings don't undo them.
@@ -106,7 +81,7 @@ def main():
                        vec_env_cls=SubprocVecEnv, env_kwargs=env_kwargs)
     # Eval on the same randomized env (including pushes): measures robustness, not a best case.
     # With pushes on, evaluation uses the fixed standard test instead of the curriculum (random shoves
-    # up to 0.3 m/s per axis, as for juan_v3/v6), so stages and runs are comparable.
+    # up to 0.3 m/s per axis), so stages and runs are comparable.
     eval_cfg = EnvConfig.from_dict(cfg.to_dict())
     if eval_cfg.randomization.push_velocity > 0:
         eval_cfg.randomization.push_curriculum = False

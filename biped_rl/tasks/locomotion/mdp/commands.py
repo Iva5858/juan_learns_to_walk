@@ -1,8 +1,6 @@
 """Commands: what the robot is asked to do (forward speed, sideways speed, turn rate, or stand
 still), plus what follows from them: the gait clock, the target heading and the commanded path.
-
-"omni" mode draws a new command every few seconds; "forward" mode (runs up to juan_v6) draws one
-forward speed per episode.
+A new command is drawn every few seconds.
 """
 import numpy as np
 
@@ -19,13 +17,10 @@ def reset(env, options):
         cmd.vec = np.array(options["command"], dtype=float)
     elif "speed" in options:
         cmd.vec = np.array([float(options["speed"]), 0.0, 0.0])
-    elif env.omni:
-        sample(env)
     else:
-        cmd.vec = np.array([rng.uniform(cfg.speed_range[0], env.curriculum.speed_max), 0.0, 0.0])
+        sample(env)
     cmd.max_forward = max(cmd.max_forward, cmd.forward)
-    # (Only drawn in omni mode, so forward-mode runs see the same random stream as before.)
-    cmd.next_resample = rng.uniform(*cfg.resample_interval) if env.omni else np.inf
+    cmd.next_resample = rng.uniform(*cfg.resample_interval)
 
 
 def sample(env):
@@ -34,8 +29,7 @@ def sample(env):
     share each only turns, only walks backward, or only walks sideways."""
     c, rng, cmd = env.cfg.command, env.np_random, env.command
     cmd.standing = bool(rng.uniform() < c.stand_prob)
-    # One draw picks the kind of command (none when all shares are off, so older runs see the same
-    # random stream as before).
+    # One draw picks the kind of command (no draw when all shares are off: the walk stage).
     shares = np.cumsum([c.turn_in_place_prob, c.backward_prob, c.sideways_prob])
     kind = int(np.searchsorted(shares, rng.uniform(), side="right")) if shares[-1] > 0 and not cmd.standing else 3
     if cmd.standing:
@@ -57,7 +51,7 @@ def sample(env):
 
 
 def resample(env):
-    """A new command every few seconds (omni mode): the policy must change gait, turn, stop and
+    """A new command every few seconds: the policy must change gait, turn, stop and
     start again mid-walk, like with a joystick."""
     cmd = env.command
     if not cmd.fixed and env.episode.t >= cmd.next_resample:

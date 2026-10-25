@@ -61,6 +61,9 @@ input[type=range]{width:100%;margin:6px 0 2px;accent-color:var(--accent)}
 .cam[hidden]{display:none}
 .cam{width:100%;aspect-ratio:4/3;border-radius:8px;background:var(--bg);display:block;object-fit:contain;margin-top:8px}
 .horizon{width:100%;height:110px;display:block;margin-top:6px}
+.cores{display:flex;gap:4px;margin-top:6px;height:26px;align-items:flex-end}
+.cores div{flex:1;background:var(--line);border-radius:3px;position:relative;height:100%}
+.cores div i{position:absolute;bottom:0;left:0;right:0;border-radius:3px;background:var(--accent)}
 .walk{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
 @media (max-width:700px){.walk{grid-template-columns:1fr}}
 .pad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(3,48px);gap:6px;justify-content:center;margin-top:8px}
@@ -94,6 +97,8 @@ kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:
     <div class="label">Raspberry Pi</div>
     <div class="big"><span id="pitemp">-</span></div>
     <div class="sub">CPU temperature &middot; servos relax at <span id="pilim"></span>&deg;C &middot; Power <b id="pipower">-</b></div>
+    <div class="kv" id="pistats"></div>
+    <div class="cores" id="cores"></div>
     <div class="kv" id="buses"></div>
   </div>
   <div class="card">
@@ -119,12 +124,13 @@ kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:
           <select id="wpolicy"></select>
           <button class="go" id="wstart" onclick="startPolicy()">Start</button>
           <button class="danger" onclick="api('/policy/stop')">Stop (hold)</button>
+          <button onclick="api('/policy/stop?why=pickup')" title="Stops the policy (servos hold) and marks the log as a pickup, not a fall">Pick up</button>
         </div>
         <div class="cmdline" id="wcmd">-</div>
         <div class="sub" id="wstats"></div>
         <div class="sub" style="margin-top:8px">Start from Home (Boot first), robot standing or hanging. The command starts at
           "stand still". Steering: <kbd>&uarr;</kbd><kbd>&darr;</kbd> forward/back, <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn,
-          <kbd>,</kbd><kbd>.</kbd> sideways, <kbd>space</kbd> stand still, <kbd>Esc</kbd> stop.
+          <kbd>,</kbd><kbd>.</kbd> sideways, <kbd>space</kbd> stand still, <kbd>Esc</kbd> stop, <kbd>P</kbd> pick up (stop, logged as a pickup).
           It stops by itself (servos hold) if a sensor goes quiet or the page is closed for 6 s
           (it stands still after 2 s), and relaxes everything if it tilts past 40&deg;.
           <b>Keep this tab in front with the screen on</b>: browsers slow down background tabs.</div>
@@ -371,6 +377,17 @@ function pi() {
   else if (p.throttled) { w.textContent = 'Throttled'; w.className = 'bad'; }
   else if (p.undervolt_before) { w.textContent = 'Dipped earlier'; w.className = 'warn'; }
   else { w.textContent = 'OK'; w.className = 'ok'; }
+  const pct = v => v === undefined ? '?' : v.toFixed(0) + '%';
+  const cls = (v, w, b) => v === undefined ? '' : v >= b ? 'bad' : v >= w ? 'warn' : '';
+  $('pistats').innerHTML = `
+    <div>CPU<b class="${cls(p.cpu, 70, 90)}">${pct(p.cpu)}</b>load ${n1(p.load, 2)}</div>
+    <div>Dashboard<b>${p.self_cpu === undefined ? '?' : p.self_cpu.toFixed(0) + '%'}</b>of one core</div>
+    <div>Memory<b class="${cls(p.mem_used_mb / p.mem_total_mb * 100, 80, 92)}">${p.mem_used_mb ? (p.mem_used_mb / 1024).toFixed(1) : '?'} GB</b>of ${p.mem_total_mb ? (p.mem_total_mb / 1024).toFixed(1) : '?'} GB</div>
+    <div>CPU clock<b>${p.arm_mhz ? p.arm_mhz.toFixed(0) : '?'} MHz</b>&nbsp;</div>
+    <div>GPU clock<b>${p.gpu_mhz ? p.gpu_mhz.toFixed(0) : '?'} MHz</b>${p.gpu_mem_mb ? p.gpu_mem_mb + ' MB memory' : ''}</div>
+    <div>Wi-Fi<b class="${p.wifi_dbm === undefined ? '' : p.wifi_dbm < -75 ? 'bad' : p.wifi_dbm < -65 ? 'warn' : ''}">${p.wifi_dbm === undefined ? '?' : p.wifi_dbm.toFixed(0) + ' dBm'}</b>signal</div>`;
+  $('cores').innerHTML = (p.cores || []).map((c, i) =>
+    `<div title="core ${i}: ${c.toFixed(0)}%"><i style="height:${Math.max(2, c).toFixed(0)}%"></i></div>`).join('');
   $('buses').innerHTML = S.buses.map(b => {
     const leg = b.ids[0] <= 4 ? 'Left' : 'Right';
     const cls = b.pass_ms > 18 ? 'bad' : b.pass_ms > 15 ? 'warn' : '';
@@ -396,9 +413,7 @@ function imu() {
       <line x1="-200" x2="200" y1="0" y2="0" stroke="var(--accent)" stroke-width="2"/></g>
     <line x1="80" x2="140" y1="55" y2="55" stroke="var(--text)" stroke-width="3"/>
     <circle cx="110" cy="55" r="3" fill="var(--text)"/>`;
-  const cal = v => `<span class="${v === 3 ? 'ok' : v === 0 ? 'bad' : 'warn'}">${v}/3</span>`;
-  const extra = m.calib ? `<div>Calibration<b>gyro ${cal(m.calib.gyro)}</b>accel ${cal(m.calib.accel)}</div>`
-    : `<div>Accel<b>${n1(m.accel_g, 2)} g</b>${m.biasing ? '<span class="warn">zeroing gyro...</span>' : 'bias ' + m.gyro_bias.map(b => b.toFixed(3)).join(' ')}</div>`;
+  const extra = `<div>Accel<b>${n1(m.accel_g, 2)} g</b>${m.biasing ? '<span class="warn">zeroing gyro...</span>' : 'bias ' + m.gyro_bias.map(b => b.toFixed(3)).join(' ')}</div>`;
   $('imukv').innerHTML = `
     <div>Gyro x<b>${n1(m.gyro[0], 2)}</b>rad/s</div><div>Gyro y<b>${n1(m.gyro[1], 2)}</b>rad/s</div><div>Gyro z<b>${n1(m.gyro[2], 2)}</b>rad/s</div>
     <div>Gravity<b>${m.gravity.map(g => g.toFixed(2)).join(' ')}</b>sim frame</div>
@@ -492,6 +507,7 @@ document.addEventListener('keydown', e => {
   if (k) { e.preventDefault(); cmdStep(...k); }
   else if (e.key === ' ') { e.preventDefault(); cmdZero(); }
   else if (e.key === 'Escape') api('/policy/stop');
+  else if (e.key === 'p' || e.key === 'P') api('/policy/stop?why=pickup');
 });
 
 // ---- personality ----

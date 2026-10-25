@@ -30,7 +30,7 @@ class TrainingDashboard(BaseCallback):
         "servo_protection": ("servo_load", "servo_saturation", "servo_overload", "backdrive", "energy",
                              "joint_limits"),
         "feet_and_impacts": ("impact", "foot_slip", "feet_distance", "footstep"),
-        "gait_shape": ("symmetry", "posture_symmetry", "step_timing", "gait_mismatch"),
+        "gait_shape": ("symmetry", "gait_mismatch"),
     }
 
     SAMPLE_EVERY = 4

@@ -1,10 +1,10 @@
 """Drive a trained policy with the keyboard in the MuJoCo viewer, starting with the boot sequence
 the real robot will use (straight legs -> home crouch -> policy).
 
-    mjpython scripts/play.py --run runs/juan_v7_4_pushes              # nominal physics
-    mjpython scripts/play.py --run runs/juan_v7_4_pushes --robust     # the realistic robot (full difficulty)
-    mjpython scripts/play.py --run runs/juan_v7_4_pushes --pushes     # + random shoves
-    python scripts/play.py --run runs/juan_v7_4_pushes --test         # no window: check the boot sequence
+    mjpython scripts/play.py --run checkpoints/juan_v7_12b_pushes_best              # nominal physics
+    mjpython scripts/play.py --run checkpoints/juan_v7_12b_pushes_best --robust     # the realistic robot (full difficulty)
+    mjpython scripts/play.py --run checkpoints/juan_v7_12b_pushes_best --pushes     # + random shoves
+    python scripts/play.py --run checkpoints/juan_v7_12b_pushes_best --test         # no window: check the boot sequence
 
 Keys (in the viewer window):
     Up / Down       forward speed  +- 0.05 m/s   (-0.1 .. top speed)
@@ -17,18 +17,16 @@ Mouse: double-click a body, then Ctrl + right-drag to push it.
 macOS needs `mjpython` (installed with mujoco) for the viewer window.
 """
 import argparse
-import json
 import threading
 import time
 from pathlib import Path
 
 import numpy as np
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
+from biped_rl.motions import boot_targets
+from biped_rl.runs import load_policy
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 from biped_rl.tasks.locomotion.mdp import commands
-from biped_rl.motions import boot_targets
 
 # GLFW key codes (the viewer passes these to key_callback)
 KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT = 265, 264, 263, 262
@@ -75,7 +73,7 @@ class Keyboard:
 
 
 def make_env(run, robust, pushes):
-    cfg = EnvConfig.from_dict(json.loads((run / "config.json").read_text()))
+    cfg = EnvConfig.load(run)
     rnd = cfg.randomization
     rnd.enabled = robust or pushes
     rnd.physics_curriculum = False  # full difficulty
@@ -98,7 +96,7 @@ def boot(env, on_step=lambda: None, seed=None):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--run", default="runs/juan_v7_4_pushes")
+    p.add_argument("--run", default="checkpoints/juan_v7_12b_pushes_best")
     p.add_argument("--best", action="store_true", help="best_model instead of final_model")
     p.add_argument("--robust", action="store_true", help="randomized physics at full difficulty")
     p.add_argument("--pushes", action="store_true", help="random 0.3 m/s shoves (implies --robust)")
@@ -107,12 +105,7 @@ def main():
 
     run = Path(a.run)
     cfg, env = make_env(run, a.robust, a.pushes)
-    if cfg.command.mode != "omni":
-        raise SystemExit("this run was trained on forward commands only: use evaluate.py --viewer")
-    norm = VecNormalize.load(str(run / ("best_vecnormalize.pkl" if a.best else "vecnormalize.pkl")),
-                             DummyVecEnv([lambda: BipedEnv(cfg.to_dict())]))
-    norm.training = False
-    model = PPO.load(run / ("best_model" if a.best else "final_model"), device="cpu")
+    model, norm = load_policy(run, cfg, best=a.best)
     act = lambda obs: model.predict(norm.normalize_obs(obs), deterministic=True)[0]
 
     if a.test:

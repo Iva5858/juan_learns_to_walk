@@ -1,17 +1,15 @@
-"""Evaluate a trained policy: gait quality, smoothness, robustness, video.
+"""Evaluate a trained policy: gait quality, smoothness, robustness, video (out/eval/<run>.mp4).
 
-    python scripts/evaluate.py --run runs/walk_v1                      # nominal physics, + eval.mp4
-    python scripts/evaluate.py --run runs/walk_v1 --robust -n 50       # randomized physics + pushes: fall rate
-    python scripts/evaluate.py --run runs/walk_v1 --speed 0.3          # fixed speed command
-    mjpython scripts/evaluate.py --run runs/walk_v1 --viewer           # live viewer (macOS needs mjpython)
+    python scripts/evaluate.py --run runs/<name>                       # nominal physics
+    python scripts/evaluate.py --run runs/<name> --robust -n 50        # randomized physics + pushes: fall rate
+    python scripts/evaluate.py --run runs/<name> --speed 0.3           # fixed speed command
+    python scripts/evaluate.py --run runs/<name> --sweep               # speed actually reached per command
+(To drive a policy yourself in the viewer: scripts/play.py.)
 """
 import argparse
-import json
-import time
 from pathlib import Path
 
 import imageio
-import mujoco.viewer
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
@@ -33,8 +31,10 @@ def sweep(env, policy, raw, cfg, episodes=3):
                 obs, _, done, info = env.step(action)
                 info = info[0]
                 steps += 1
-                speeds.append(info["forward_velocity"]); yaw.append(info["heading_error_deg"])
-                sat.append(info["saturation"]); impact.append(info["peak_force_bw"])
+                speeds.append(info["forward_velocity"])
+                yaw.append(info["heading_error_deg"])
+                sat.append(info["saturation"])
+                impact.append(info["peak_force_bw"])
                 if done[0]:
                     falls += steps * raw.dt < cfg.episode_seconds - 1e-6
                     break
@@ -44,18 +44,17 @@ def sweep(env, policy, raw, cfg, episodes=3):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--run", default="runs/walk_v1")
+    p.add_argument("--run", default="checkpoints/juan_v7_12b_pushes_best")
     p.add_argument("--best", action="store_true", help="use best_model instead of final_model")
     p.add_argument("-n", "--episodes", type=int, default=5)
     p.add_argument("--speed", type=float, help="fixed speed command (default: max of the range)")
     p.add_argument("--robust", action="store_true", help="keep domain randomization and pushes on")
-    p.add_argument("--viewer", action="store_true")
     p.add_argument("--sweep", action="store_true",
                    help="command 0.1, 0.2, ... up to speed_limit and report the speed actually reached")
     args = p.parse_args()
 
     run = Path(args.run)
-    cfg = EnvConfig.from_dict(json.loads((run / "config.json").read_text()))
+    cfg = EnvConfig.load(run)
     cfg.randomization.enabled = args.robust
     speed = args.speed if args.speed is not None else cfg.command.speed_range[1]
 
@@ -67,18 +66,6 @@ def main():
 
     if args.sweep:
         sweep(env, policy, raw, cfg)
-        return
-
-    if args.viewer:
-        env.set_options({"speed": speed})
-        obs = env.reset()
-        with mujoco.viewer.launch_passive(raw.model, raw.data) as viewer:
-            while viewer.is_running():
-                start = time.time()
-                action, _ = policy.predict(obs, deterministic=True)
-                obs, _, _, _ = env.step(action)
-                viewer.sync()
-                time.sleep(max(0.0, raw.dt - (time.time() - start)))
         return
 
     mass_g = raw.model.body_subtreemass[1] * 9.81
@@ -121,7 +108,8 @@ def main():
     print(f"\nfall rate: {100 * np.mean([r['fell'] for r in rows]):.0f}%  "
           f"mean speed: {np.mean([r['speed'] for r in rows]):.2f} m/s")
 
-    out = run / "eval.mp4"
+    out = Path(__file__).resolve().parents[1] / "out" / "eval" / f"{run.name}.mp4"
+    out.parent.mkdir(parents=True, exist_ok=True)
     imageio.mimsave(out, end_of_clip(frames, round(1 / raw.dt)), fps=round(1 / raw.dt))
     print(f"Video of episode 0: {out}")
 

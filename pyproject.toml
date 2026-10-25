@@ -1,12 +1,16 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "biped-rl"
-version = "0.7.0"
-description = "Reinforcement learning for Juan, a small servo-driven biped, in MuJoCo"
-requires-python = ">=3.10"
+name = "juan-learns-to-walk"
+version = "0.8.0"
+description = "Reinforcement learning for Juan, a small servo-driven biped: MuJoCo training and the real robot's code"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "LICENSES/*"]
+authors = [{ name = "Isaac Velez Aguirre" }]
+requires-python = ">=3.11"
 dependencies = [
     "mujoco>=3.2",
     "gymnasium>=1.0",
@@ -16,7 +20,48 @@ dependencies = [
     "imageio",
     "imageio-ffmpeg",
     "moviepy<2",  # TensorBoard videos (torch needs moviepy.editor)
+    "pillow",
 ]
 
+[project.optional-dependencies]
+robot = ["pyserial", "smbus2"]  # the real robot (on the Pi these come from apt, see docs/bringup.md)
+plots = ["matplotlib"]          # scripts/analysis/replay.py --plot
+
+[dependency-groups]
+test = ["pytest>=8"]
+lint = ["ruff>=0.6"]
+dev = [{ include-group = "test" }, { include-group = "lint" }, "pre-commit"]
+
 [tool.setuptools.packages.find]
-include = ["biped_rl*"]
+include = ["biped_rl*", "robot*"]
+
+[tool.setuptools.package-data]
+robot = ["dashboard.html", "policies/*", "sounds/*"]
+
+[tool.pytest.ini_options]
+minversion = "8"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+markers = ["slow: takes more than a few seconds (deselect with -m 'not slow')"]
+filterwarnings = ["ignore::DeprecationWarning"]
+log_level = "INFO"
+xfail_strict = true
+
+[tool.ruff]
+line-length = 150
+target-version = "py311"
+extend-exclude = ["juan"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "I", "UP"]
+ignore = [
+    "E731",  # small named lambdas are used on purpose
+    "B905",  # zip() without strict=: the sequences are equal by construction
+]
+
+[tool.uv]
+# The versions every result in this repository was produced with (uv.lock pins them exactly).
+constraint-dependencies = [
+    "mujoco==3.15.0", "gymnasium==1.4.0", "stable-baselines3==2.9.0", "torch==2.14.1", "numpy==2.4.6",
+    "tensorboard==2.21.0", "imageio==2.38.1", "imageio-ffmpeg==0.6.0", "moviepy==1.0.3", "pillow==12.3.0",
+]

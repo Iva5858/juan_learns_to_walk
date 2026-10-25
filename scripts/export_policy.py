@@ -1,6 +1,6 @@
 """Export a trained policy for the robot (numpy only), and check it against the simulator.
 
-    python scripts/export_policy.py runs/juan_v7_8_best      # -> robot/policies/juan_v7_8_best.npz
+    python scripts/export_policy.py runs/<name>      # -> robot/policies/<name>.npz
 
 Checks, before saving:
   1. the numpy network gives the same actions as the trained PyTorch policy;
@@ -10,20 +10,18 @@ Checks, before saving:
 """
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-PROJECT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT))  # the robot/ package isn't installed
-from biped_rl.symmetry import mirror_maps  # noqa: E402
-from biped_rl.tasks.locomotion import BipedEnv, EnvConfig  # noqa: E402
-from biped_rl.tasks.locomotion.mdp import observations  # noqa: E402
-from robot.joints import NAMES  # noqa: E402
-from robot.policy import Controller, Policy  # noqa: E402
+from biped_rl.robots import PROJECT
+from biped_rl.symmetry import mirror_maps
+from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
+from biped_rl.tasks.locomotion.mdp import observations
+from robot.joints import NAMES
+from robot.policy import Controller, Policy
 
 # (seconds, forward, sideways, turn): the closed-loop check
 SCRIPT = [(2, 0, 0, 0), (4, 0.3, 0, 0), (3, 0.2, 0, 0.4), (3, 0, 0.1, 0), (2, -0.1, 0, 0), (2, 0, 0, 0)]
@@ -123,7 +121,7 @@ def export(run, out):
         tmp.unlink()
         raise SystemExit("MISMATCH: not exported")
     tmp.replace(out)
-    print(f"saved {out.relative_to(PROJECT)} ({out.stat().st_size // 1024} kB)")
+    print(f"saved {out} ({out.stat().st_size // 1024} kB)")
 
 
 def main():

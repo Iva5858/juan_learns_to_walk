@@ -123,10 +123,7 @@ class EpisodeState:
     last_push: float = -np.inf
     last_push_vec: np.ndarray = None
     td_step: list = field(default_factory=lambda: [None, None])  # control step of each foot's last touchdown
-    td_last_leg: int = None
-    td_intervals: deque = field(default_factory=lambda: deque(maxlen=2))
     stride_est: int = None      # measured steps per stride (from one foot's touchdowns)
-    timing_asym: float = 0.0    # latest left/right step-timing asymmetry
 
 
 CACHE_DIR = Path(__file__).resolve().parents[3] / "out" / "model_cache"
@@ -195,7 +192,6 @@ class BipedEnv(gym.Env):
         self._render_size = (height, width)
         self._renderer = None
         self.nu = m.nu
-        self.omni = cfg.command.mode == "omni"
 
         self.robot = self._load_robot()
         self.servo, self.domain = ServoState(), DomainState()
@@ -206,7 +202,7 @@ class BipedEnv(gym.Env):
                                           push_level=np.full(8, rc.push_start))
         self.command = CommandState()
 
-        self.actor_obs_dim = observations.actor_dim(cfg, self.nu, self.omni)
+        self.actor_obs_dim = observations.actor_dim(cfg, self.nu)
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self.nu,), dtype=np.float32)
         self.observation_space = spaces.Box(-np.inf, np.inf, dtype=np.float64,
                                             shape=(self.actor_obs_dim + observations.privileged_dim(self.nu),))
@@ -221,8 +217,8 @@ class BipedEnv(gym.Env):
         joint_ids = m.actuator_trnid[:, 0]
         self._convert_actuators_to_torque(joint_ids)
         names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, j) for j in joint_ids]
-        pairs = [(names.index(l), names.index(r), sgn) for l, r, sgn in cfg.robot.mirror_pairs
-                 if l in names and r in names]
+        pairs = [(names.index(left), names.index(right), sgn) for left, right, sgn in cfg.robot.mirror_pairs
+                 if left in names and right in names]
         feet = []
         for name in cfg.robot.foot_bodies:
             bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, name)
@@ -413,9 +409,9 @@ class BipedEnv(gym.Env):
             speed_ratio = np.abs(qd) * inv_speed
             overspeed += np.maximum(speed_ratio - 1.0, 0.0)
             peak_speed_ratio = max(peak_speed_ratio, speed_ratio.max())
-            if w.break_requires_load > 0:  # over-speed while the servo fights it: gear-stripping load
-                loaded_overspeed |= bool(np.any((speed_ratio > w.break_joint_speed)
-                                                & (np.abs(tau_c) > w.break_requires_load * stall)))
+            # over-speed while the servo fights it: gear-stripping load
+            loaded_overspeed |= bool(np.any((speed_ratio > w.break_joint_speed)
+                                            & (np.abs(tau_c) > w.break_requires_load * stall)))
             peak_tau = np.maximum(peak_tau, np.abs(tau_c))
             d.ctrl[:] = tau_c
             mujoco.mj_step(m, d)
@@ -563,21 +559,11 @@ class BipedEnv(gym.Env):
         ep.contact = (phys.peak_force > 0.05 * robot.weight).astype(float)
         new_td = (ep.contact == 1) & (prev_contact == 0)
         touchdowns = float(np.sum(new_td))
-        # Step timing from touchdowns: the real stride length (for the symmetry terms) and whether
-        # left->right and right->left take equally long (a lopsided rhythm is a skip).
+        # The real stride length, from one foot's touchdowns (for the symmetry term).
         for leg in np.flatnonzero(new_td):
-            other = 1 - leg
             if ep.td_step[leg] is not None and 6 <= ep.steps - ep.td_step[leg] <= 40:
                 ep.stride_est = ep.steps - ep.td_step[leg]
-            if ep.td_step[other] is not None and ep.td_last_leg == other:
-                ep.td_intervals.append(ep.steps - ep.td_step[other])
-                if len(ep.td_intervals) == 2:
-                    i1, i2 = ep.td_intervals
-                    ep.timing_asym = abs(i1 - i2) / (i1 + i2)
-            elif ep.td_last_leg == leg:
-                ep.td_intervals.clear()  # same foot twice: not an alternating pair, restart
             ep.td_step[leg] = ep.steps
-            ep.td_last_leg = leg
         # Direction reversals: a joint clearly moving one way (>0.2 rad/s), then clearly the other.
         sign = np.where(np.abs(qd) > 0.2, np.sign(qd), 0.0)
         reversals = float(np.sum((sign != 0) & (ep.qd_sign != 0) & (sign != ep.qd_sign)))

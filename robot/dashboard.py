@@ -272,6 +272,7 @@ class Robot:
 
     # ---------------------------------------------------------------- IMU and Pi
     def _pi_loop(self):
+        self.sysstats = SysStats()
         while True:
             t = pi_temp()
             if t is not None and not self.pi_hot and t >= PI_TEMP_LIMIT:
@@ -281,7 +282,7 @@ class Robot:
                 self.pi_hot = False
             if self.pi_hot:
                 self.relax()
-            self.pi = {"temp": t, **throttled()}
+            self.pi = {"temp": t, **throttled(), **self.sysstats.read()}
             time.sleep(1)
 
     # ---------------------------------------------------------------- page state
@@ -334,6 +335,71 @@ def pi_temp():
             return round(int(f.read()) / 1000, 1)
     except (OSError, ValueError):
         return None
+
+
+class SysStats:
+    """CPU (total, per core, this program), memory, clocks, GPU memory and Wi-Fi signal, from /proc and
+    vcgencmd. Cheap: read once a second (vcgencmd every 5 s)."""
+
+    def __init__(self):
+        self._cpu, self._self, self._n, self._vc = None, None, 0, {}
+
+    @staticmethod
+    def _cpu_times():
+        out = []
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("cpu"):
+                    v = list(map(int, line.split()[1:]))
+                    out.append((sum(v), v[3] + v[4]))  # total, idle + iowait
+        return out
+
+    def read(self):
+        s = {}
+        try:
+            now = self._cpu_times()
+            if self._cpu:
+                busy = [100 * (1 - (i1 - i0) / max(t1 - t0, 1)) for (t0, i0), (t1, i1) in zip(self._cpu, now)]
+                s["cpu"], s["cores"] = busy[0], busy[1:]
+            self._cpu = now
+            with open("/proc/self/stat") as f:  # this dashboard (all its threads), % of one core
+                v = f.read().split(")")[1].split()
+            ticks, wall = int(v[11]) + int(v[12]), time.monotonic()
+            if self._self:
+                s["self_cpu"] = 100 * (ticks - self._self[0]) / os.sysconf("SC_CLK_TCK") / max(wall - self._self[1], 1e-3)
+            self._self = (ticks, wall)
+            with open("/proc/loadavg") as f:
+                s["load"] = float(f.read().split()[0])
+            mem = {}
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    k, v = line.split(":")
+                    mem[k] = int(v.split()[0])
+            s["mem_used_mb"] = (mem["MemTotal"] - mem["MemAvailable"]) / 1024
+            s["mem_total_mb"] = mem["MemTotal"] / 1024
+            with open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") as f:
+                s["arm_mhz"] = int(f.read()) / 1000
+        except (OSError, ValueError, KeyError, IndexError):
+            pass
+        try:
+            with open("/proc/net/wireless") as f:
+                lines = f.readlines()[2:]
+            if lines:
+                s["wifi_dbm"] = float(lines[0].split()[3].rstrip("."))
+        except (OSError, ValueError, IndexError):
+            pass
+        if self._n % 5 == 0:  # vcgencmd: GPU (VideoCore) clock and memory split
+            vc = {}
+            for key, cmd in (("gpu_mhz", ["measure_clock", "core"]), ("gpu_mem_mb", ["get_mem", "gpu"])):
+                try:
+                    out = subprocess.run(["vcgencmd", *cmd], capture_output=True, text=True, timeout=1).stdout
+                    val = out.strip().split("=")[1]
+                    vc[key] = int(val) / 1e6 if key == "gpu_mhz" else int(val.rstrip("M"))
+                except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+                    pass
+            self._vc = vc
+        self._n += 1
+        return {**s, **self._vc}
 
 
 def throttled():
@@ -409,7 +475,7 @@ class Handler(BaseHTTPRequestHandler):
             elif p == "/policy/start":
                 self.result(robot.walker.start(q["name"]))
             elif p == "/policy/stop":
-                robot.walker.stop("stopped from the page")
+                robot.walker.stop("stopped: picked up" if q.get("why") == "pickup" else "stopped from the page")
                 self.result()
             elif p == "/policy/cmd":
                 self.result(robot.walker.set_command(float(q["vx"]), float(q["vy"]), float(q["wz"])))
@@ -492,7 +558,7 @@ def main():
         try:
             server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
         except OSError:
-            raise SystemExit(f"Port {PORT} is busy: stop any other servo script first (Ctrl+C in its window).")
+            raise SystemExit(f"Port {PORT} is busy: stop any other servo script first (Ctrl+C in its window).") from None
     robot = Robot()
     for bus in robot.buses:
         print(f"Bus {bus.port}: servos {', '.join(map(str, bus.ids))}")

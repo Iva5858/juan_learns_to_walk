@@ -24,9 +24,15 @@ HIP_ROLL_JOINTS = ("left_hip_roll", "right_hip_roll")
 MIRROR_PAIRS = (("left_hip_roll", "right_hip_roll", -1), ("left_hip_pitch", "right_hip_pitch", 1),
                 ("left_knee", "right_knee", 1), ("left_ankle", "right_ankle", 1))
 
-# Hiwonder HTD-35H at 11.1 V. Only the stall torque and the speed are published; the internal
-# gains are estimates until measured on the bench.
+# Hiwonder HTD-35H at 11.1 V. Only the stall torque and the speed are published; the gains are
+# estimates (the training default).
 STALL_TORQUE = 3.43   # Nm (35 kg*cm x 0.0981)
 NO_LOAD_SPEED = 5.8   # rad/s (0.18 s per 60 deg); torque falls linearly to 0 at this speed
 KP = 15.0             # Nm/rad (estimate: full torque at ~13 deg of error)
 KD = 0.2              # Nm*s/rad (estimate)
+
+# The real servos, fitted from the robot's own walking logs (scripts/analysis/replay.py, 4 logs):
+# stiffer than the estimate (kp 25-40) and slower to react (70-90 ms from a new target to motion).
+# A policy trained on the estimate weaves on the real robot. EnvConfig.use_measured_servos().
+MEASURED_KP = 30.0
+MEASURED_DELAY_STEPS = (3, 4)   # whole 20 ms control steps, plus 5-19 ms latency within the step

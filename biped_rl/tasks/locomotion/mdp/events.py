@@ -1,8 +1,5 @@
 """Events: domain randomization when an episode starts, varied starting states, and shoves during
 an episode. Settings: RandomizationConfig.
-
-Random draws that were added after a run was trained only happen when switched on, so older runs
-see exactly the random numbers they were trained with.
 """
 import mujoco
 import numpy as np
@@ -49,13 +46,9 @@ def randomize_physics(env):
     m.opt.gravity[:] = g * np.array([np.sin(tilt) * np.cos(heading),
                                      np.sin(tilt) * np.sin(heading), -np.cos(tilt)])
     r = env.cfg.robot
-    if c.voltage_coupled:  # one battery voltage: torque and speed rise and fall together
-        volt = rng.uniform(*c.servo_strength)
-        sv.stall = r.stall_torque * volt * rng.uniform(0.95, 1.05, nu)
-        sv.speed = r.no_load_speed * volt * rng.uniform(0.95, 1.05, nu)
-    else:
-        sv.stall = r.stall_torque * rng.uniform(*c.servo_strength) * rng.uniform(0.95, 1.05, nu)
-        sv.speed = r.no_load_speed * rng.uniform(*c.servo_speed) * rng.uniform(0.95, 1.05, nu)
+    volt = rng.uniform(*c.servo_strength)  # one battery voltage: torque and speed rise and fall together
+    sv.stall = r.stall_torque * volt * rng.uniform(0.95, 1.05, nu)
+    sv.speed = r.no_load_speed * volt * rng.uniform(0.95, 1.05, nu)
     sv.kp = r.kp * rng.uniform(*c.kp_scale, size=nu)
     sv.kd = r.kd * rng.uniform(*c.kd_scale, size=nu)
     lat = int(rng.uniform(*c.latency) / m.opt.timestep)
@@ -63,41 +56,31 @@ def randomize_physics(env):
     # The v7 realism below is scaled by the physics-curriculum difficulty (1 = the full ranges).
     k = env.curriculum.difficulty
     upto = lambda span: (span[0], span[0] + k * (span[1] - span[0]))
-    if tuple(c.total_mass_scale) != (1.0, 1.0) or tuple(c.torso_mass_scale) != (1.0, 1.0):
-        extra = np.full(m.nbody, rng.uniform(*upto(c.total_mass_scale)))
-        extra[root] *= rng.uniform(*upto(c.torso_mass_scale))
-        m.body_mass[:] *= extra
-        m.body_inertia[:] *= extra[:, None]
-    if c.action_delay_steps[1] > 0:
-        lo, hi = upto(c.action_delay_steps)
-        sv.action_delay = int(rng.integers(int(lo), int(round(hi)) + 1))
-    if c.obs_delay_steps[1] > 0:
-        lo, hi = upto(c.obs_delay_steps)
-        sv.obs_delay = int(rng.integers(int(lo), int(round(hi)) + 1))
-    if c.backlash[1] > 0:
-        sv.backlash = rng.uniform(*upto(c.backlash), size=nu)
-    if c.joint_offset > 0:
-        sv.joint_offset = rng.uniform(-k * c.joint_offset, k * c.joint_offset, nu)
-    if c.imu_tilt_bias_deg > 0:
-        bias = k * c.imu_tilt_bias_deg
-        roll, pitch = np.radians(rng.uniform(-bias, bias, 2))
-        cr, sr, cp, sp = np.cos(roll), np.sin(roll), np.cos(pitch), np.sin(pitch)
-        env.domain.imu_tilt = (np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
-                               @ np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]]))
-    if c.gyro_bias > 0:
-        env.domain.gyro_bias = rng.uniform(-k * c.gyro_bias, k * c.gyro_bias, 3)
-    if c.gyro_vibration[1] > 0:  # (no draws when off: older runs keep their random stream)
-        rms = rng.uniform(*upto(c.gyro_vibration))
-        env.domain.vibration = (rms * np.array([0.4, 1.0, 0.4]), rng.uniform(*c.gyro_vibration_hz),
-                                rng.uniform(0, 2 * np.pi, 3))
+    extra = np.full(m.nbody, rng.uniform(*upto(c.total_mass_scale)))
+    extra[root] *= rng.uniform(*upto(c.torso_mass_scale))
+    m.body_mass[:] *= extra
+    m.body_inertia[:] *= extra[:, None]
+    lo, hi = upto(c.action_delay_steps)
+    sv.action_delay = int(rng.integers(int(lo), int(round(hi)) + 1))
+    lo, hi = upto(c.obs_delay_steps)
+    sv.obs_delay = int(rng.integers(int(lo), int(round(hi)) + 1))
+    sv.backlash = rng.uniform(*upto(c.backlash), size=nu)
+    sv.joint_offset = rng.uniform(-k * c.joint_offset, k * c.joint_offset, nu)
+    bias = k * c.imu_tilt_bias_deg
+    roll, pitch = np.radians(rng.uniform(-bias, bias, 2))
+    cr, sr, cp, sp = np.cos(roll), np.sin(roll), np.cos(pitch), np.sin(pitch)
+    env.domain.imu_tilt = (np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
+                           @ np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]]))
+    env.domain.gyro_bias = rng.uniform(-k * c.gyro_bias, k * c.gyro_bias, 3)
+    rms = rng.uniform(*upto(c.gyro_vibration))
+    env.domain.vibration = (rms * np.array([0.4, 1.0, 0.4]), rng.uniform(*c.gyro_vibration_hz),
+                            rng.uniform(0, 2 * np.pi, 3))
 
 
 def vary_start_state(env):
     """Start from a perturbed crouch, already moving (as in Berkeley Humanoid Lite): joint angles =
     home x a per-joint scale, plus a torso velocity. Then the robot is put back on the floor."""
     c, d, rng, robot = env.cfg.randomization, env.data, env.np_random, env.robot
-    if tuple(c.reset_joint_scale) == (1.0, 1.0) and c.reset_lin_vel == 0 and c.reset_ang_vel == 0:
-        return  # off (runs up to juan_v7): no extra random draws
     qi = robot.qpos_idx
     noise = d.qpos[qi] - robot.home_joint
     d.qpos[qi] = np.clip(robot.home_joint * rng.uniform(*c.reset_joint_scale, env.nu) + noise,

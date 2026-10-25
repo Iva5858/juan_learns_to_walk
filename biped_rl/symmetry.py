@@ -2,7 +2,7 @@
 
 Juan is basically left-right symmetric, so a good policy is too: in the mirror image of a situation it
 should do the mirror image of what it does now. Instead of rewarding symmetry (which bent the
-gait: v4 skipped), the actor is symmetric by construction (see policy.py):
+gait into a skip), the actor is symmetric by construction (see policy.py):
 
     action(s) = 1/2 * ( f(s) + M_a f(M_s s) )
 
@@ -24,9 +24,9 @@ def joint_mirror(env):
     motion flips the angle, e.g. hip roll)."""
     perm = np.arange(env.nu)
     sign = np.ones(env.nu)
-    for l, r, s in zip(env.robot.mirror_l, env.robot.mirror_r, env.robot.mirror_sign):
-        perm[l], perm[r] = r, l
-        sign[l] = sign[r] = s
+    for left, right, s in zip(env.robot.mirror_l, env.robot.mirror_r, env.robot.mirror_sign):
+        perm[left], perm[right] = right, left
+        sign[left] = sign[right] = s
     if len(env.robot.mirror_l) * 2 != env.nu:
         raise ValueError("every actuated joint needs a mirror partner in RobotConfig.mirror_pairs")
     return perm, sign
@@ -35,17 +35,17 @@ def joint_mirror(env):
 def mirror_maps(env):
     """(obs_perm, obs_sign, act_perm, act_sign): mirrored[i] = sign[i] * x[perm[i]].
 
-    Actor observation layout (see BipedEnv._sensor_frame / _get_obs), repeated per history frame:
+    Actor observation layout (mdp/observations.py), repeated per history frame:
         gravity in torso frame (3)   -> (x, -y, z)        a vector: its sideways part flips
         gyro (3)                     -> (-x, y, -z)       an angular rate: roll and yaw flip
-        joint angles, joint speeds, previous actions (nu each, if joint feedback) -> partner, sign
-    then the command (forward, sideways, turn rate) -> (vx, -vy, -yaw rate) [omni] or vx [forward],
+        joint angles, joint speeds, previous actions (nu each) -> partner, sign
+    then the command (forward, sideways, turn rate) -> (vx, -vy, -yaw rate),
     the gait clock (sin, cos) -> (-sin, -cos): mirroring swaps the legs, i.e. half a cycle,
     and the heading error (sin, cos) -> (-sin, cos). The privileged part (critic only) is
     left as it is: the actor never sees it.
     """
     jp, js = joint_mirror(env)
-    nu, cfg = env.nu, env.cfg
+    cfg = env.cfg
     perm, sign = [], []
 
     def block(p, s):
@@ -56,9 +56,9 @@ def mirror_maps(env):
     for _ in range(cfg.history):
         block([0, 1, 2], [1, -1, 1])
         block([0, 1, 2], [-1, 1, -1])
-        for _ in range(3 if cfg.robot.joint_feedback else 1):
+        for _ in range(3):
             block(jp, js)
-    block([0, 1, 2], [1, -1, -1]) if env.omni else block([0], [1])
+    block([0, 1, 2], [1, -1, -1])
     block([0, 1], [-1, -1])
     block([0, 1], [-1, 1])
     assert len(perm) == env.actor_obs_dim, (len(perm), env.actor_obs_dim)

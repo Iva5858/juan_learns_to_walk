@@ -18,7 +18,7 @@ def apply_stage(cfg, stage):
       physics   randomized physics, with the v7 realism (delays, heavy torso, slack, IMU bias...)
                 phased in by the physics curriculum; no pushes; forgiving speed tracking
       pushes    randomized physics at full difficulty + the per-direction push curriculum
-    Each stage is a separate run that --resume's the previous one (see train_v7.sh)."""
+    Each stage is a separate run that --resume's the previous one (see README)."""
     rnd, cmd, w = cfg.randomization, cfg.command, cfg.rewards
     rnd.enabled = stage in ("physics", "pushes")
     # Speed-tracking kernel: forgiving while learning to walk (creeping must beat standing, or the

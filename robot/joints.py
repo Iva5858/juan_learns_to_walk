@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 COUNTS_PER_DEG = 1000 / 240
 
 # name, servo ID, simulator joint range (deg), home pose (deg), what + means.
-# Ranges and home must match juan/rl_robot_train.xml (checked by scripts/check_robot_joints.py).
+# Ranges and home must match juan/rl_robot.xml (checked by scripts/check_robot_joints.py).
 JOINTS = (
     ("left_hip_roll", 1, -5.0, 25.0, 0.0, "leg outward"),
     ("left_hip_pitch", 2, -90.0, 25.0, -22.92, "leg back"),

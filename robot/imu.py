@@ -7,8 +7,7 @@
 
 The LSM9DS1 (accelerometer + gyro, magnetometer unused) has no on-chip fusion, so gravity is
 estimated here: the gyro rotates the previous estimate, and the accelerometer pulls it back with a
-0.5 s time constant (a complementary filter), ignoring the accelerometer during impacts. Falls back
-to a BNO055 (robot/bno055.py, on-chip fusion) if no LSM9DS1 answers.
+0.5 s time constant (a complementary filter), ignoring the accelerometer during impacts.
 """
 import math
 import threading
@@ -166,11 +165,7 @@ class IMU:
         try:
             self.device = LSM9DS1(self.bus)
         except Exception as e:
-            from robot.bno055 import BNO055  # the other IMU this robot has used
-            try:
-                self.device = BNO055(self.bus)
-            except Exception:
-                raise OSError(f"I2C bus {self.bus}: {e}")
+            raise OSError(f"I2C bus {self.bus}: {e}") from e
         self.error = None
         self.reset()
         self.zero_gyro()
@@ -190,18 +185,8 @@ class IMU:
             t0 = time.perf_counter()
             self.reads += 1
             try:
-                if isinstance(self.device, LSM9DS1):
-                    accel, gyro = self.device.read()
-                    accel, gyro = remap(accel, self.axes), remap(gyro, self.axes)
-                    self._update(accel, gyro, dt)
-                else:  # BNO055: fused on the chip
-                    r = self.device.read(self.axes)
-                    if r is None:
-                        self.failures += 1
-                    else:
-                        # (yaw: integrated here; the chip's fused gravity replaces the filter's)
-                        self.filter.yaw -= sum(r["gyro"][k] * r["gravity"][k] for k in range(3)) * dt
-                        self._publish(r["gravity"], r["gyro"], 9.80665, r["calib"])
+                accel, gyro = self.device.read()
+                self._update(remap(accel, self.axes), remap(gyro, self.axes), dt)
             except OSError as e:
                 self.failures += 1
                 self.error = str(e)
@@ -226,7 +211,7 @@ class IMU:
             gyro = [gyro[k] - self.gyro_bias[k] for k in range(3)]
             g = self.filter.update(accel, gyro, dt)
         if g is not None:
-            self._publish(g, gyro, self.filter.a_norm, None)
+            self._publish(g, gyro, self.filter.a_norm)
 
     def _smooth_gyro(self, gyro, dt=1.0 / RATE_HZ):
         self.gyro_raw_rms = math.sqrt(0.995 * self.gyro_raw_rms ** 2 + 0.005 * (gyro[0] ** 2 + gyro[1] ** 2))
@@ -238,8 +223,8 @@ class IMU:
         self._gyro_f = [f + a * (g - f) for f, g in zip(self._gyro_f, gyro)]
         return list(self._gyro_f)
 
-    def _publish(self, gravity, gyro, a_norm, calib):
+    def _publish(self, gravity, gyro, a_norm):
         gyro = self._smooth_gyro(gyro)
         self.state = {"gravity": list(gravity), "gyro": gyro, "yaw": self.filter.yaw, "accel_g": a_norm / 9.80665,
-                      "gyro_raw_rms": self.gyro_raw_rms, "gyro_lowpass_hz": self.gyro_lowpass_hz, "calib": calib, "biasing": time.monotonic() < self._bias_until,
+                      "gyro_raw_rms": self.gyro_raw_rms, "gyro_lowpass_hz": self.gyro_lowpass_hz, "biasing": time.monotonic() < self._bias_until,
                       "gyro_bias": list(self.gyro_bias), "t": time.time(), "device": self.device.name}

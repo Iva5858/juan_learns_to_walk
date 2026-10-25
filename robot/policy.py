@@ -1,7 +1,7 @@
 """The walking policy on the robot: a numpy-only copy of the trained actor and the exact observation
 and action pipeline of the simulator, so the Pi needs neither torch nor the training code.
 
-    policy = Policy("robot/policies/juan_v7_8_best.npz")   # made by scripts/export_policy.py
+    policy = Policy("robot/policies/juan_v7_12b_pushes_best.npz")   # made by scripts/export_policy.py
     ctrl = Controller(policy)
     ctrl.start(sensors)            # at the home pose, robot standing still
     targets = ctrl.tick(sensors)   # every 20 ms: joint targets in radians (simulator convention)
