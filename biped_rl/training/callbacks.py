@@ -158,6 +158,8 @@ class VideoRecorder(BaseCallback):
 
 
 class SaveVecNormalize(BaseCallback):
+    """Saves the normalization statistics next to best_model.zip whenever EvalCallback saves a new best."""
+
     def __init__(self, path):
         super().__init__()
         self.path = path

@@ -53,7 +53,7 @@ def randomize_physics(env):
     sv.kd = r.kd * rng.uniform(*c.kd_scale, size=nu)
     lat = int(rng.uniform(*c.latency) / m.opt.timestep)
     sv.latency_steps = min(lat, env.frame_skip - 1)
-    # The v7 realism below is scaled by the physics-curriculum difficulty (1 = the full ranges).
+    # The hardest randomization below is scaled by the physics-curriculum difficulty (1 = the full ranges).
     k = env.curriculum.difficulty
     upto = lambda span: (span[0], span[0] + k * (span[1] - span[0]))
     extra = np.full(m.nbody, rng.uniform(*upto(c.total_mass_scale)))
@@ -101,7 +101,7 @@ def push_robot(env, s, terminated, truncated):
     if rc.enabled and rc.push_velocity > 0 and ep.t >= ep.next_push:
         if rc.push_curriculum:
             k = int(rng.integers(8))
-            yaw = np.arctan2(s.R[1, 0], s.R[0, 0])
+            yaw = env.yaw()
             angle = yaw + (k + rng.uniform()) * np.pi / 4  # direction k: [k*45, (k+1)*45) deg
             strength = min(cur.push_level[k] * rng.uniform(0.75, 1.1), rc.push_velocity)
             push = strength * np.array([np.cos(angle), np.sin(angle)])

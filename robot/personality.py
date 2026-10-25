@@ -84,11 +84,10 @@ class Personality:
         self._cancel.set()
 
     def _tilt(self):
-        st = self.robot.imu.state if getattr(self.robot, "imu", None) else None
+        st = self.robot.imu.state if getattr(self.robot, "imu", None) else None  # (the IMU starts after us)
         if st is None or time.time() - st["t"] > 0.2:
             return None
-        gx, gy, gz = st["gravity"]
-        return math.degrees(math.acos(max(-1.0, min(1.0, -gz))))
+        return math.degrees(math.acos(max(-1.0, min(1.0, -st["gravity"][2]))))  # from upright, any direction
 
     def _current_pose(self):
         out = {}

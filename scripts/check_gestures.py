@@ -24,9 +24,7 @@ MAX_TILT, MAX_TORQUE = 15.0, 0.9
 def play(cfg, keys, seed, video=None):
     env = BipedEnv(cfg.to_dict(), render_mode="rgb_array" if video else None, width=480, height=360)
     env.reset(seed=seed)
-    env.place_pose(env.robot.home_joint)
-    for _ in range(50):
-        env.hold_pose(env.robot.home_joint)
+    env.settle_at_home()
     sv, m, d = env.servo, env.model, env.data
     slack = sv.backlash if sv.backlash.any() else None
     tilt = peak_tau = peak_speed = 0.0

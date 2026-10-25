@@ -40,15 +40,15 @@ def gyro_seen(env, noise):
     if vib is not None and c.enabled:
         rms, hz, phase = vib
         g = g + np.sqrt(2) * rms * np.sin(2 * np.pi * hz * env.episode.t + phase)
+    ep = env.episode
     if c.gyro_lowpass_hz > 0:
-        prev = getattr(env, "gyro_filtered", None)
-        if prev is None:
-            env.gyro_filtered = np.array(g, dtype=float)
+        if ep.gyro_filtered is None:
+            ep.gyro_filtered = np.array(g, dtype=float)
         else:
             a = env.dt / (1.0 / (2 * np.pi * c.gyro_lowpass_hz) + env.dt)
-            env.gyro_filtered = prev + a * (g - prev)
-        g = env.gyro_filtered.copy()
-    env.gyro_reading = np.array(g, dtype=float)  # (what the robot controller would be fed; export check)
+            ep.gyro_filtered = ep.gyro_filtered + a * (g - ep.gyro_filtered)
+        g = ep.gyro_filtered.copy()
+    ep.gyro_reading = np.array(g, dtype=float)
     return g
 
 

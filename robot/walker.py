@@ -5,8 +5,8 @@ Safety, checked every tick:
   * tilt over TILT_RELAX_DEG: the robot is falling: policy off and every servo relaxed;
   * stale sensors (a servo or the IMU silent for STALE_S): policy off, servos hold their targets;
   * lost connection (no page or joystick for LINK_STAND_S): command set to "stand still";
-    after LINK_STOP_S: policy off, servos hold. (Was 1 s / 3 s: 6 of 8 test runs on 2026-10-24 were
-    cut short by it, from a backgrounded tab or Wi-Fi gaps.)
+    after LINK_STOP_S: policy off, servos hold. (Long enough to ride out a backgrounded tab or a
+    Wi-Fi gap.)
 Every run is logged to robot/logs/ (observations, actions, targets, joints, IMU, timing) for
 comparing with the simulator.
 """
@@ -17,6 +17,7 @@ import time
 
 import numpy as np
 
+from robot.imu import tilt_deg
 from robot.joints import BY_NAME, COUNTS_PER_DEG, NAMES
 from robot.policy import Controller, Policy
 
@@ -75,32 +76,33 @@ class Walker:
         r = self.robot
         if not r.cal.zero_set:
             return "not calibrated: set zero first"
-        pers = getattr(r, "personality", None)
-        if pers and pers.busy() and pers.idle_playing():
+        pers = r.personality
+        if pers.busy() and pers.idle_playing():
             pers.stop()  # a playful-mode idle animation: the walk takes over
             for _ in range(25):
                 if not pers.busy():
                     break
                 time.sleep(0.02)
-        if pers and pers.busy():
+        if pers.busy():
             return "a gesture is playing"
         if any(BY_NAME[n][1] not in r.bus_of for n in NAMES):
             return "not all 8 servos found"
         if any(r.locked(BY_NAME[n][1]) for n in NAMES):
             return "a servo is locked (too hot)"
-        sensors, why = self._sensors()
-        if sensors is None:
-            return why
-        lean = math.hypot(*tilt(sensors["gravity"]))
-        if lean > START_TILT_DEG:
-            return f"not upright (tilted {lean:.0f} deg)"
-        far = [n for n, q, h in zip(NAMES, sensors["q"], self._home(name)) if abs(math.degrees(q - h)) > START_TOLERANCE_DEG]
-        if far:
-            return "not at home (" + ", ".join(far) + "): press Home first"
         try:
             policy = Policy(os.path.join(POLICY_DIR, name + ".npz"))
         except (OSError, KeyError, ValueError) as e:
             return f"can't load {name}: {e}"
+        sensors, why = self._sensors()
+        if sensors is None:
+            return why
+        lean = math.hypot(*tilt_deg(sensors["gravity"]))
+        if lean > START_TILT_DEG:
+            return f"not upright (tilted {lean:.0f} deg)"
+        home = policy.meta["home"]
+        far = [n for n, q, h in zip(NAMES, sensors["q"], home) if abs(math.degrees(q - h)) > START_TOLERANCE_DEG]
+        if far:
+            return "not at home (" + ", ".join(far) + "): press Home first"
         self.ctrl = Controller(policy)
         self.ctrl.start(sensors)
         self.policy_name, self.running, self.status = name, True, "running"
@@ -121,12 +123,6 @@ class Walker:
             self.listener("fall" if "tilted" in why else "lost" if "connection" in why else "stop")
 
     # ---- the loop ----
-    def _home(self, name):
-        try:
-            return Policy(os.path.join(POLICY_DIR, name + ".npz")).meta["home"]
-        except Exception:
-            return np.zeros(len(NAMES))
-
     def _sensors(self):
         """Latest joint angles (rad) and IMU, or (None, reason) if anything is stale."""
         r, now = self.robot, time.time()
@@ -171,7 +167,7 @@ class Walker:
                     break
             else:
                 stale = 0
-                right, fwd = tilt(sensors["gravity"])
+                right, fwd = tilt_deg(sensors["gravity"])
                 if math.hypot(right, fwd) > TILT_RELAX_DEG:
                     self.stop(f"stopped: tilted {math.hypot(right, fwd):.0f} deg (falling): relaxed", relax=True)
                     break
@@ -223,8 +219,3 @@ class Walker:
                 "policies": policies(), "default": default_policy(), "move_ms": self.move_ms, **self.stats,
                 "ranges": None if self.ctrl is None else {k: np.asarray(self.ctrl.policy.meta[k]).tolist()
                                                           for k in ("forward_range", "lateral_range", "yaw_rate_range")}}
-
-
-def tilt(gravity):
-    gx, gy, gz = gravity
-    return math.degrees(math.atan2(-gy, -gz)), math.degrees(math.atan2(gx, -gz))

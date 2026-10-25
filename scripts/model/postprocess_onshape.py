@@ -142,7 +142,7 @@ def main():
     root = tree.getroot()
     report = []
 
-    # ---- physics options, joint defaults (match the placeholder the training was tuned on)
+    # ---- physics options, joint defaults (the ones the training was tuned with)
     root.find("compiler").set("inertiafromgeom", "true")
     if root.find("option") is None:
         root.insert(1, ET.Element("option", timestep="0.002", integrator="implicitfast"))

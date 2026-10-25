@@ -124,6 +124,8 @@ class EpisodeState:
     last_push_vec: np.ndarray = None
     td_step: list = field(default_factory=lambda: [None, None])  # control step of each foot's last touchdown
     stride_est: int = None      # measured steps per stride (from one foot's touchdowns)
+    gyro_filtered: np.ndarray = None  # state of the robot-side gyro low-pass (observations.gyro_seen)
+    gyro_reading: np.ndarray = None   # the gyro as the robot's controller gets it
 
 
 CACHE_DIR = Path(__file__).resolve().parents[3] / "out" / "model_cache"
@@ -178,10 +180,10 @@ class BipedEnv(gym.Env):
         if isinstance(config, dict):
             config = EnvConfig.from_dict(config)
         self.cfg = cfg = config or EnvConfig()
-        # The simulation leaves out the visual-only CAD meshes (~1.8 GB per environment for Juan: 18
-        # training workers ran out of memory) with identical physics (load_physics_model); render()
-        # loads the full model only when a frame is actually drawn. (Stable-Baselines3's make_vec_env
-        # asks every training environment for render_mode="rgb_array", though they never render.)
+        # The simulation leaves out the visual-only CAD meshes (~1.8 GB per environment for Juan) with
+        # identical physics (load_physics_model); render() loads the full model the first time it draws.
+        # (Stable-Baselines3's make_vec_env asks every training environment for render_mode="rgb_array",
+        # though they never render.)
         self._model_path = resolve_model_path(cfg.robot.model_path)
         self.model = m = load_physics_model(self._model_path)
         self.data = mujoco.MjData(m)
@@ -300,16 +302,21 @@ class BipedEnv(gym.Env):
             signs.append(1.0 if spread[1] > spread[0] else -1.0)
         return np.array(signs)
 
-    # Indirection so tools can swap the physics (e.g. pushes on nominal physics).
-    def set_nominal_physics(self):
-        events.set_nominal_physics(self)
-
-    def randomize_physics(self):
-        events.randomize_physics(self)
-
     # ------------------------------------------------------------------ geometry and sensing
     def root_rot(self):
         return self.data.xmat[self.robot.root].reshape(3, 3)
+
+    def yaw(self):
+        """Torso heading in the world [rad], + = turned left."""
+        R = self.root_rot()
+        return float(np.arctan2(R[1, 0], R[0, 0]))
+
+    def moved_since(self, start_xy, start_yaw):
+        """(forward m, left m, turned deg) since a start position and heading, in the start's frame."""
+        d = self.data.qpos[0:2] - start_xy
+        c, s = np.cos(start_yaw), np.sin(start_yaw)
+        turned = (self.yaw() - start_yaw + np.pi) % (2 * np.pi) - np.pi
+        return float(c * d[0] + s * d[1]), float(-s * d[0] + c * d[1]), float(np.degrees(turned))
 
     def com_height(self):
         return float(self.data.subtree_com[self.robot.root][2])
@@ -426,9 +433,9 @@ class BipedEnv(gym.Env):
         super().reset(seed=seed)
         cfg, rng, d, cmd = self.cfg, self.np_random, self.data, self.command
         if cfg.randomization.enabled:
-            self.randomize_physics()
+            events.randomize_physics(self)
         else:
-            self.set_nominal_physics()
+            events.set_nominal_physics(self)
         self._reset_to_home()
         # Random start heading: the policy must learn "hold the heading you started with", not
         # "walk along world +x".
@@ -463,7 +470,6 @@ class BipedEnv(gym.Env):
             next_push=rng.uniform(*cfg.randomization.push_interval),
             last_action=np.zeros(self.nu), last_action2=np.zeros(self.nu), qd_sign=np.zeros(self.nu))
         self.curriculum.pending_push = None
-        self.gyro_filtered = None  # restart the robot-side gyro low-pass (observations.read_sensors)
         reading = observations.read_sensors(self)
         ep.sensor_buf.extend([reading] * ep.sensor_buf.maxlen)
         ep.action_buf.extend([ep.last_action] * cfg.history)
@@ -471,7 +477,7 @@ class BipedEnv(gym.Env):
         return observations.compute(self), {}
 
     def step(self, action):
-        cfg, d, ep, cmd, w = self.cfg, self.data, self.episode, self.command, self.cfg.rewards
+        cfg, ep, cmd, w = self.cfg, self.episode, self.command, self.cfg.rewards
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
         s = self._measure(action, self._actuate(action))
         reward, task, pen, penalty = rewards.compute(self, s)
@@ -504,10 +510,10 @@ class BipedEnv(gym.Env):
         info = {f"rew/{k}": v for k, v in task.items()}
         info.update({f"pen/{k}": v for k, v in pen.items()})
         info.update({
-            "forward_velocity": s.vx, "command": cvx, "x_position": d.qpos[0],
+            "forward_velocity": s.vx, "command": cvx,
             "lateral_velocity": s.vy, "command_lateral": cvy,
-            "yaw_rate": s.ang_world[2], "command_yaw_rate": cwz, "standing": float(cmd.standing),
-            "speed_error": s.speed_error, "tracking": s.tracking, "penalty_scale": float(np.exp(-penalty)),
+            "yaw_rate": s.ang_world[2], "command_yaw_rate": cwz,
+            "speed_error": s.speed_error, "penalty_scale": float(np.exp(-penalty)),
             "speed_max": self.curriculum.speed_max,
             "heading_error_deg": abs(np.degrees(s.yaw_err)), "lateral_offset": abs(s.offset),
             "energy": s.energy, "flight": float(ep.contact.sum() == 0),
@@ -519,7 +525,6 @@ class BipedEnv(gym.Env):
             "broke": float(broke), "fell": float(fell and not broke),
             "action_delta": np.mean(np.abs(action - ep.last_action2)),
             "base_height": self.com_height(),
-            "recovering": float(s.recovering),
             "push_level_mean": float(self.curriculum.push_level.mean()),
             "push_level_min": float(self.curriculum.push_level.min()),
             "physics_difficulty": self.curriculum.difficulty,
@@ -598,7 +603,7 @@ class BipedEnv(gym.Env):
         """Change the command mid-episode (keyboard, joystick). All zero = stand still."""
         commands.set_command(self, forward, sideways, turn_rate)
 
-    # ------------------------------------------------------------------ scripted motion (play.py)
+    # ------------------------------------------------------------------ scripted motion, the robot's view
     def place_pose(self, joints):
         """Put the robot standing still in joint pose `joints` (absolute angles), soles on the floor."""
         d, robot = self.data, self.robot
@@ -621,13 +626,26 @@ class BipedEnv(gym.Env):
             mujoco.mj_step(self.model, self.data)
         return not (self.non_foot_ground_contact() or self.gravity_body()[2] > -0.6)
 
+    def settle_at_home(self, steps=50):
+        """Stand still in the home pose with the servos holding it (the robot's state before a policy
+        or a gesture starts)."""
+        self.place_pose(self.robot.home_joint)
+        for _ in range(steps):
+            self.hold_pose(self.robot.home_joint)
+
+    def robot_readings(self):
+        """What the real robot's controller (robot/policy.py) reads this step: servo angles and speeds,
+        and the IMU's gravity, (low-passed) gyro and heading."""
+        d, robot = self.data, self.robot
+        return {"q": d.qpos[robot.qpos_idx].copy(), "qd": d.qvel[robot.dof_idx].copy(),
+                "gravity": self.gravity_body(), "gyro": self.episode.gyro_reading.copy(), "yaw": self.yaw()}
+
     def start_policy(self, options=None):
         """Hand over to the policy from wherever the robot is now (after a scripted motion), the way
         the real robot will: the start heading is the current one, histories are filled with the
         current readings, the last action and the filter are zero. Returns the observation."""
         cmd = self.command
-        R = self.root_rot()
-        cmd.heading0 = float(np.arctan2(R[1, 0], R[0, 0]))
+        cmd.heading0 = self.yaw()
         cmd.heading_target = cmd.heading0
         cmd.start_xy = self.data.qpos[0:2].copy()
         cmd.ref_xy = cmd.start_xy.copy()

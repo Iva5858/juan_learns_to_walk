@@ -6,7 +6,9 @@ Checks, before saving:
   1. the numpy network gives the same actions as the trained PyTorch policy;
   2. the robot's controller (robot/policy.py) builds exactly the simulator's observations and
      drives the simulated Juan through stand / walk / turn / sideways / back / stand, step by step
-     the same as the training code.
+     the same as the training code, without falling. On the nominal robot, but with the shortest
+     servo delay the policy was trained with: a policy trained only with long delays can be
+     unstable without any, which says nothing about the real robot (it has them).
 """
 import argparse
 import json
@@ -77,18 +79,11 @@ def export(run, out):
 
     # 2. closed loop through the robot controller
     env.reset(seed=1)
-    env.place_pose(env.robot.home_joint)
-    for _ in range(25):
-        env.hold_pose(env.robot.home_joint)
+    env.servo.action_delay = int(cfg.randomization.action_delay_steps[0])
+    env.settle_at_home(25)
     obs = env.start_policy()
     ctrl = Controller(policy)
-
-    def sensors():
-        d, R = env.data, env.root_rot()
-        return {"q": d.qpos[env.robot.qpos_idx].copy(), "qd": d.qvel[env.robot.dof_idx].copy(),
-                "gravity": env.gravity_body(), "gyro": env.gyro_reading.copy(), "yaw": float(np.arctan2(R[1, 0], R[0, 0]))}
-
-    ctrl.start(sensors(), phase=env.command.phase)
+    ctrl.start(env.robot_readings(), phase=env.command.phase)
     obs_err = act_err = 0.0
     fell = False
     for seconds, vx, vy, wz in SCRIPT:
@@ -96,7 +91,7 @@ def export(run, out):
         ctrl.set_command(vx, vy, wz)
         obs = observations.compute(env)  # the sim's observation with the new command
         for _ in range(int(seconds / env.dt)):
-            ctrl.tick(sensors())
+            ctrl.tick(env.robot_readings())
             diff = np.abs(ctrl.last_obs - obs[:env.actor_obs_dim])
             if diff.max() > 1e-6 and obs_err <= 1e-6:
                 i = np.flatnonzero(diff > 1e-6)
@@ -106,7 +101,7 @@ def export(run, out):
             sim_a = np.clip(model.predict(norm.normalize_obs(obs), deterministic=True)[0], -1, 1)
             act_err = max(act_err, np.abs(ctrl.last_action - sim_a).max())
             obs, _, term, _, _ = env.step(sim_a)
-            target_err = np.abs(ctrl.target - env.episode.target).max()
+            target_err = np.abs(ctrl.target - env.episode.target_buf[-1]).max()  # newest, before the delay
             act_err = max(act_err, target_err)
             if term:
                 fell = True

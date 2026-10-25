@@ -31,13 +31,10 @@ python scripts/evaluate.py -n 3                # speed, gait, impacts, smoothnes
 python scripts/analysis/straight.py checkpoints/juan_v7_12b_pushes_best    # drift, turning and weave
 python scripts/analysis/falls.py checkpoints/juan_v7_12b_pushes_best       # falls with and without shoves
 
-# fine-tune it (e.g. a reward change); ~50 min per 30M steps on an 18-core Mac
-python scripts/train.py --run-name my_run --stage pushes --resume checkpoints/juan_v7_12b_pushes_best \
-    --timesteps 30000000 --lr 1e-4 --reward heading=2.0
-tensorboard --logdir runs                      # charts (see docs/training.md)
-
-# put it on the robot
-python scripts/export_policy.py runs/my_run    # -> robot/policies/my_run.npz, checked step by step against the sim
+# fine-tune it, export it for the robot and compare it with the start: ~1 h on an 18-core Mac
+./scripts/finetune.sh my_run                   # extra options go to train.py, e.g. --reward heading=3.0
+tensorboard --logdir runs                      # charts while it trains (see docs/training.md)
+# -> robot/policies/my_run.npz (checked step by step against the simulator) and runs/my_run_report.txt
 ```
 
 `checkpoints/` holds the training state (network, normalization, curricula, config) of the policy on the robot, so you can fine-tune from it. Training outputs go to `runs/<name>/` (not in git). Run everything from the project folder, and keep the project out of iCloud-synced folders: iCloud turns checkpoints into placeholders that hang training.

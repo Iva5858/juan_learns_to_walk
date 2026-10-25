@@ -62,7 +62,6 @@ class Controller:
         self.period, self.period_fast = float(m["gait_period"]), float(m["gait_period_fast"])
         self.fast_speed = float(m["fast_speed"])
         self.command = np.zeros(3)
-        self.started = False
 
     # ---- commands (the joystick) ----
     def set_command(self, forward, sideways=0.0, turn_rate=0.0):
@@ -90,7 +89,6 @@ class Controller:
         self.sensor_buf = deque([self._reading(sensors)] * self.history, maxlen=self.history)
         self.action_buf = deque([np.zeros(n)] * self.history, maxlen=self.history)
         self.target = np.clip(self.home.copy(), self.lo, self.hi)
-        self.started = True
 
     def observation(self, sensors):
         self.sensor_buf.append(self._reading(sensors))
@@ -101,8 +99,8 @@ class Controller:
         yaw_err = (sensors["yaw"] - self.heading_target + math.pi) % (2 * math.pi) - math.pi
         # If the robot falls far behind the commanded turn (slipping feet), the target waits for it:
         # past +-180 deg the error would wrap and the policy would suddenly turn the other way. In
-        # training (v7_10, pushes and turns) 99.9% of errors are under 108 deg, so this cap
-        # changes almost nothing the policy has seen.
+        # training (pushes and turns) 99.9% of errors are under 108 deg, so this cap changes almost
+        # nothing the policy has seen.
         if abs(yaw_err) > MAX_HEADING_ERROR:
             yaw_err = math.copysign(MAX_HEADING_ERROR, yaw_err)
             self.heading_target = sensors["yaw"] - yaw_err

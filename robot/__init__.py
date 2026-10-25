@@ -10,6 +10,7 @@
     robot.camera        Pi camera MJPEG stream (hardware encoder)
     robot.gestures      keyframe gestures; robot.personality plays them, robot.sound is the voice
     robot.selftest      hardware check that moves nothing (python3 -m robot.selftest)
+    robot.pi_health     the Pi's temperature, power flags, CPU and memory
 
 Only needs numpy, pyserial and smbus2 (and picamera2 for the camera), not the training stack.
 """

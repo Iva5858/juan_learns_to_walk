@@ -6,7 +6,6 @@ robots (no pushes). By default on the measured real servos (EnvConfig.use_measur
     python scripts/analysis/straight.py runs/a runs/b --speeds 0.2 --seeds 4 --as-trained
 """
 import argparse
-import math
 from pathlib import Path
 
 import numpy as np
@@ -15,26 +14,18 @@ from biped_rl.runs import load_policy
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 
 
-def yaw_of(env):
-    R = env.root_rot()
-    return math.atan2(R[1, 0], R[0, 0])
-
-
 def walk(model, norm, cfg, speed, seed, seconds=10.0):
     env = BipedEnv(cfg.to_dict())
     obs, _ = env.reset(seed=seed, options={"speed": speed})
-    y0, p0 = yaw_of(env), env.data.qpos[:2].copy()
+    y0, p0 = env.yaw(), env.data.qpos[:2].copy()
     fell, yaws = False, []
     for _ in range(int(seconds / env.dt)):
         obs, _, term, _, _ = env.step(model.predict(norm.normalize_obs(obs), deterministic=True)[0])
         if term:
             fell = True
             break
-        yaws.append(yaw_of(env))
-    d = env.data.qpos[:2] - p0
-    fwd = d[0] * math.cos(y0) + d[1] * math.sin(y0)
-    left = -d[0] * math.sin(y0) + d[1] * math.cos(y0)
-    turn = math.degrees((yaw_of(env) - y0 + math.pi) % (2 * math.pi) - math.pi)
+        yaws.append(env.yaw())
+    fwd, left, turn = env.moved_since(p0, y0)
     # weave: after the first 2 s, with the steady drift removed
     y = np.degrees(np.unwrap(yaws[100:])) if len(yaws) > 150 else np.zeros(2)
     x = np.arange(len(y))

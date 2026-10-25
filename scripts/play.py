@@ -26,7 +26,6 @@ import numpy as np
 from biped_rl.motions import boot_targets
 from biped_rl.runs import load_policy
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
-from biped_rl.tasks.locomotion.mdp import commands
 
 # GLFW key codes (the viewer passes these to key_callback)
 KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT = 265, 264, 263, 262
@@ -115,15 +114,14 @@ def main():
         for label, command, seconds in (("stand", (0, 0, 0), 2), ("forward 0.3", (0.3, 0, 0), 5),
                                         ("turn left 0.4 while walking 0.2", (0.2, 0, 0.4), 5), ("stop", (0, 0, 0), 2)):
             env.set_command(*command)
-            x0, yaw0, fell = env.data.qpos[0:2].copy(), commands.heading_error(env) + env.command.heading_target, False
+            x0, yaw0, fell = env.data.qpos[0:2].copy(), env.yaw(), False
             for _ in range(int(seconds / env.dt)):
                 obs, _, terminated, _, _ = env.step(act(obs))
                 if terminated:
                     fell = True
                     break
-            yaw = commands.heading_error(env) + env.command.heading_target
             print(f"  {label:32s} moved {np.linalg.norm(env.data.qpos[0:2] - x0):.2f} m, "
-                  f"turned {np.degrees(yaw - yaw0):+.0f} deg{'  FELL' if fell else ''}")
+                  f"turned {env.moved_since(x0, yaw0)[2]:+.0f} deg{'  FELL' if fell else ''}")
         return
 
     import mujoco.viewer

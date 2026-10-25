@@ -26,8 +26,7 @@ def episode(env, model, norm, seed, speed):
         obs, _, term, trunc, info = env.step(model.predict(norm.normalize_obs(obs), deterministic=True)[0])
         if env.episode.last_push != seen:  # a shove this step
             seen = env.episode.last_push
-            R = env.root_rot()
-            yaw = np.arctan2(R[1, 0], R[0, 0])
+            yaw = env.yaw()
             v = env.episode.last_push_vec
             last_push = (seen, np.cos(yaw) * v[0] + np.sin(yaw) * v[1], -np.sin(yaw) * v[0] + np.cos(yaw) * v[1])
         if term or trunc:

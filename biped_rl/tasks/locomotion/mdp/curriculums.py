@@ -3,7 +3,7 @@ own; biped_rl/training/stages.py carries them over between runs (curriculum.json
 
 * speed: the top of the forward-speed command grows while the top commands are tracked through
   whole, safe episodes (CommandConfig.speed_range .. speed_limit).
-* physics difficulty: scales the realism added in v7, 0 -> 1 (RandomizationConfig.physics_curriculum).
+* physics difficulty: scales the hardest randomization, 0 -> 1 (RandomizationConfig.physics_curriculum).
 * push strength: per push direction relative to the robot (RandomizationConfig.push_curriculum).
 """
 import numpy as np

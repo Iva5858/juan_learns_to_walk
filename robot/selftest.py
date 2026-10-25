@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 
+from robot import pi_health
 from robot.joints import BY_ID, Calibration
 
 results = []
@@ -60,21 +61,19 @@ def system():
     report("PASS" if len(ports) == 2 else "FAIL", "serial ports", ", ".join(ports) or "none")
     i2c = sorted(glob.glob("/dev/i2c-*"))
     report("PASS" if i2c else "FAIL", "I2C buses", ", ".join(i2c) or "none: enable I2C (docs/bringup.md, step 1.2)")
-    out = run(["vcgencmd", "get_throttled"])
-    if out:
-        flags = int(out.strip().split("=")[1], 16)
+    flags = pi_health.throttle_flags()
+    if flags is not None:
         if flags & 0x5:
             report("FAIL", "Pi power", f"undervoltage or throttling now (flags {flags:#x})")
         elif flags & 0x50000:
             report("WARN", "Pi power", f"undervoltage or throttling happened since boot (flags {flags:#x})")
         else:
             report("PASS", "Pi power", "no undervoltage or throttling since boot")
-    try:
-        with open("/sys/class/thermal/thermal_zone0/temp") as f:
-            t = int(f.read()) / 1000
-        report("PASS" if t < 65 else "WARN", "Pi temperature", f"{t:.1f} C")
-    except OSError:
+    t = pi_health.temperature()
+    if t is None:
         report("WARN", "Pi temperature", "not readable")
+    else:
+        report("PASS" if t < 65 else "WARN", "Pi temperature", f"{t:.1f} C")
     return ports
 
 

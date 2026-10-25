@@ -37,7 +37,7 @@ Each stage is its own run that resumes the previous one (`--stage` and `--resume
 | `physics` | randomized, phased in by a difficulty curriculum (0 → 1) | all | none |
 | `pushes` | randomized, full difficulty | all | per-direction curriculum, up to 0.4 m/s |
 
-Fine-tunes start from a `pushes`-stage policy with a lower learning rate (`--lr 1e-4`). `--reward`, `--command`, `--robot` and `--randomization NAME=VALUE` override any setting for a run. Learning to walk from zero on Juan's model has so far ended in standing still; every policy here descends from one first trained on a simpler placeholder biped.
+Fine-tunes start from a `pushes`-stage policy with a lower learning rate (`--lr 1e-4`); [scripts/finetune.sh](../scripts/finetune.sh) is the whole loop (train, export, compare) with the current recipe. `--reward`, `--command`, `--robot` and `--randomization NAME=VALUE` override any setting for a run. Learning to walk from zero on Juan's model has so far ended in standing still; every policy here descends from one first trained on a simpler placeholder biped.
 
 ## Reading TensorBoard
 

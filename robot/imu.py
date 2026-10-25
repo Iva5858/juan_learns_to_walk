@@ -17,11 +17,11 @@ RATE_HZ = 200
 TAU_S = 0.5           # accelerometer correction time constant
 ACCEL_TRUST = 0.15    # use the accelerometer only within +-15% of 1 g (not during impacts)
 BIAS_SECONDS = 2.0    # gyro bias averaged over this long at start (robot still)
-# Low-pass on the gyro the POLICY sees. On the robot the servos make the torso buzz at ~15-20 Hz: the
-# gyro read 0.5-2.7 rad/s rms while standing still (training: 0.1), and the v7_10 / v7_11 policies
-# amplified it into a 16-18 Hz chatter (robot logs, 2026-10-24). In sim, a 4 Hz filter cut that chatter
-# from 41% to 8% of the action energy without changing clean walking. The gravity estimate and the yaw
-# use the raw gyro (filtering would only slow them down). None = off.
+# Low-pass on the gyro the POLICY sees. The servos make the torso buzz at ~15-20 Hz (the gyro reads
+# 0.5-2.7 rad/s rms while standing still), and policies trained without the filter amplified it into a
+# 16-18 Hz chatter. In sim, a 4 Hz filter cut that chatter from 41% to 8% of the action energy without
+# changing clean walking; the simulator applies the same filter (RandomizationConfig.gyro_lowpass_hz).
+# The gravity estimate and the yaw use the raw gyro (filtering would only slow them down). None = off.
 GYRO_LOWPASS_HZ = 4.0
 
 # LSM9DS1 accelerometer + gyro (magnetometer is a separate device at 0x1C / 0x1E, not used)

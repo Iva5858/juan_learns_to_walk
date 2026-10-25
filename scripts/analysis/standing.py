@@ -18,21 +18,16 @@ from robot.policy import Controller, Policy
 def episode(policy, cfg, seed, command, seconds):
     env = BipedEnv(cfg.to_dict())
     env.reset(seed=seed)
-    env.place_pose(env.robot.home_joint)
-    for _ in range(50):
-        env.hold_pose(env.robot.home_joint)
+    env.settle_at_home()
     env.start_policy()
     ctrl = Controller(policy)
-    yaw = lambda: math.atan2(env.root_rot()[1, 0], env.root_rot()[0, 0])
-    sens = lambda: {"q": env.data.qpos[env.robot.qpos_idx].copy(), "qd": env.data.qvel[env.robot.dof_idx].copy(),
-                    "gravity": env.gravity_body(), "gyro": env.gyro_reading.copy(), "yaw": yaw()}
-    ctrl.start(sens())
+    ctrl.start(env.robot_readings())
     ctrl.set_command(*command)
     env.set_command(*command)
-    y0, p0 = yaw(), env.data.qpos[:2].copy()
+    y0, p0 = env.yaw(), env.data.qpos[:2].copy()
     lean, offset, jump = [], [], 0.0
     for t in range(int(seconds * 50)):
-        ctrl.tick(sens())
+        ctrl.tick(env.robot_readings())
         if t < 25:  # the first half second after taking over from home
             jump = max(jump, float(np.degrees(np.abs(ctrl.target - env.robot.home_joint)).max()))
         if env.step(ctrl.last_action)[2]:
@@ -41,10 +36,7 @@ def episode(policy, cfg, seed, command, seconds):
             g = env.gravity_body()
             lean.append(math.degrees(math.atan2(g[0], -g[2])))  # + = forward
             offset.append(float(np.degrees(np.sqrt(np.mean((env.data.qpos[env.robot.qpos_idx] - env.robot.home_joint) ** 2)))))
-    d = env.data.qpos[:2] - p0
-    fwd = d[0] * math.cos(y0) + d[1] * math.sin(y0)
-    left = -d[0] * math.sin(y0) + d[1] * math.cos(y0)
-    turn = math.degrees((yaw() - y0 + math.pi) % (2 * math.pi) - math.pi)
+    fwd, left, turn = env.moved_since(p0, y0)
     return float(np.mean(lean)), float(np.mean(offset)), jump, fwd, left, turn
 
 

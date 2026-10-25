@@ -15,42 +15,40 @@ def apply_stage(cfg, stage):
                 speed tracking
       commands  nominal physics, no pushes; all commands (backward, stand, sideways, turning, changed
                 every few seconds); forgiving speed tracking
-      physics   randomized physics, with the v7 realism (delays, heavy torso, slack, IMU bias...)
+      physics   randomized physics, with the hardest parts (delays, heavy torso, slack, IMU bias...)
                 phased in by the physics curriculum; no pushes; forgiving speed tracking
       pushes    randomized physics at full difficulty + the per-direction push curriculum
-    Each stage is a separate run that --resume's the previous one (see README)."""
+    Each stage is a separate run that resumes the previous one (docs/training.md). Settings the stage
+    does not mention keep their value."""
     rnd, cmd, w = cfg.randomization, cfg.command, cfg.rewards
-    rnd.enabled = stage in ("physics", "pushes")
-    # Speed-tracking kernel: forgiving while learning to walk (creeping must beat standing, or the
-    # policy settles for standing still), then sharp (juan_v3's) once it walks, so it can't trade
-    # speed away for small penalty savings.
-    learning = stage in ("walk", "commands", "physics")
-    w.tracking_vel = 2.0 if learning else RewardWeights().tracking_vel
-    w.tracking_sigma2 = 0.02 if learning else RewardWeights().tracking_sigma2
-    w.tracking_broad_share = 0.5 if learning else RewardWeights().tracking_broad_share
-    # Stage 1 is the task the forward-only runs learned to walk on: one forward speed per episode,
-    # no stand, no backward, no sideways/turning. With those mixed in from the start (~30% of
-    # commands near zero, a new command every few seconds), standing still won.
-    default = CommandConfig()
+    rnd0, cmd0, w0 = RandomizationConfig(), CommandConfig(), RewardWeights()
     walk = stage == "walk"
-    cmd.straight_prob = 1.0 if walk else default.straight_prob
-    cmd.turn_in_place_prob = 0.0 if walk else default.turn_in_place_prob
-    cmd.backward_prob = 0.0 if walk else default.backward_prob
-    cmd.sideways_prob = 0.0 if walk else default.sideways_prob
-    cmd.lateral_range = default.lateral_range
-    cmd.stand_prob = 0.0 if walk else default.stand_prob
-    cmd.backward_speed = 0.0 if walk else default.backward_speed
-    cmd.resample_interval = (1e9, 1e9) if walk else default.resample_interval
-    rnd.push_velocity = RandomizationConfig().push_velocity if stage == "pushes" else 0.0
+    learning = stage in ("walk", "commands", "physics")
+    randomized = stage in ("physics", "pushes")
+    rnd.enabled = randomized
+    # Speed-tracking kernel: forgiving while learning to walk (creeping must beat standing, or the
+    # policy settles for standing still), then sharp once it walks, so it can't trade speed away for
+    # small penalty savings.
+    w.tracking_vel = 2.0 if learning else w0.tracking_vel
+    w.tracking_sigma2 = 0.02 if learning else w0.tracking_sigma2
+    w.tracking_broad_share = 0.5 if learning else w0.tracking_broad_share
+    # "walk": one forward speed per episode, nothing else. With all the commands mixed in from the start
+    # (~30% of them near zero, a new one every few seconds), standing still won.
+    cmd.straight_prob = 1.0 if walk else cmd0.straight_prob
+    cmd.turn_in_place_prob = 0.0 if walk else cmd0.turn_in_place_prob
+    cmd.backward_prob = 0.0 if walk else cmd0.backward_prob
+    cmd.sideways_prob = 0.0 if walk else cmd0.sideways_prob
+    cmd.lateral_range = cmd0.lateral_range
+    cmd.stand_prob = 0.0 if walk else cmd0.stand_prob
+    cmd.backward_speed = 0.0 if walk else cmd0.backward_speed
+    cmd.resample_interval = (1e9, 1e9) if walk else cmd0.resample_interval
+    rnd.push_velocity = rnd0.push_velocity if stage == "pushes" else 0.0
     rnd.push_curriculum = stage == "pushes"
-    rnd.physics_curriculum = stage == "physics"  # stage 4 trains on the full-difficulty robot
-    # Varied starting states once physics is randomized (also switches them on when resuming a run
-    # saved before they existed).
-    default_rnd = RandomizationConfig()
-    varied = stage in ("physics", "pushes")
-    rnd.reset_joint_scale = default_rnd.reset_joint_scale if varied else (1.0, 1.0)
-    rnd.reset_lin_vel = default_rnd.reset_lin_vel if varied else 0.0
-    rnd.reset_ang_vel = default_rnd.reset_ang_vel if varied else 0.0
+    rnd.physics_curriculum = stage == "physics"  # "pushes" trains on the full-difficulty robot
+    # Varied starting states once the physics is randomized.
+    rnd.reset_joint_scale = rnd0.reset_joint_scale if randomized else (1.0, 1.0)
+    rnd.reset_lin_vel = rnd0.reset_lin_vel if randomized else 0.0
+    rnd.reset_ang_vel = rnd0.reset_ang_vel if randomized else 0.0
 
 
 # Curriculum levels live in the env processes and would start over with every new run; they are

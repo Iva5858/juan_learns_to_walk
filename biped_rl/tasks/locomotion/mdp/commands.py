@@ -82,9 +82,7 @@ def heading_error(env):
     """Yaw relative to the target heading, wrapped to [-pi, pi]. The target is the start heading
     turned by the integrated turn-rate command. On the robot: IMU yaw minus the yaw recorded at
     the start, minus the integrated joystick turn rate."""
-    R = env.root_rot()
-    yaw = np.arctan2(R[1, 0], R[0, 0])
-    return (yaw - env.command.heading_target + np.pi) % (2 * np.pi) - np.pi
+    return (env.yaw() - env.command.heading_target + np.pi) % (2 * np.pi) - np.pi
 
 
 def lateral_offset(env):
