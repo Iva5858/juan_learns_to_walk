@@ -14,8 +14,8 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - run: uvx ruff@0.6.9 check .
 
   test:
@@ -23,7 +23,7 @@ jobs:
     # macOS on Apple silicon: the platform every result here was produced on (small PyTorch wheel, no CUDA)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --locked --group test
       - run: uv run pytest
