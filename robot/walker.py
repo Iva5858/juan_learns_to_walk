@@ -5,7 +5,8 @@ Safety, checked every tick:
   * tilt over TILT_RELAX_DEG: the robot is falling: policy off and every servo relaxed;
   * stale sensors (a servo or the IMU silent for STALE_S): policy off, servos hold their targets;
   * lost connection (no page or joystick for LINK_STAND_S): command set to "stand still";
-    after LINK_STOP_S: policy off, servos hold.
+    after LINK_STOP_S: policy off, servos hold. (Was 1 s / 3 s: 6 of 8 test runs on 2026-10-24 were
+    cut short by it, from a backgrounded tab or Wi-Fi gaps.)
 Every run is logged to robot/logs/ (observations, actions, targets, joints, IMU, timing) for
 comparing with the simulator.
 """
@@ -21,8 +22,8 @@ from robot.policy import Controller, Policy
 
 TILT_RELAX_DEG = 40
 STALE_S = 0.1
-LINK_STAND_S = 1.0
-LINK_STOP_S = 3.0
+LINK_STAND_S = 2.0
+LINK_STOP_S = 6.0
 START_TOLERANCE_DEG = 10   # every joint within this of home to start
 START_TILT_DEG = 20        # and the torso within this of upright
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -154,7 +155,9 @@ class Walker:
 
     def _loop(self):
         dt = self.ctrl.dt
-        log = {k: [] for k in ("t", "obs", "action", "target", "q", "qd", "gravity", "gyro", "yaw", "command", "tick_ms")}
+        log = {k: [] for k in ("t", "obs", "action", "target", "q", "qd", "gravity", "gyro", "yaw", "command", "tick_ms",
+                               "link_s")}
+        link_max = 0.0
         stale, overruns, ticks = 0, 0, 0
         next_t = time.monotonic()
         t0 = time.time()
@@ -173,6 +176,7 @@ class Walker:
                     self.stop(f"stopped: tilted {math.hypot(right, fwd):.0f} deg (falling): relaxed", relax=True)
                     break
                 quiet = time.monotonic() - self.last_link
+                link_max = max(link_max, quiet)
                 if quiet > LINK_STOP_S:
                     self.stop("stopped: lost the connection")
                     break
@@ -184,7 +188,7 @@ class Walker:
                 for k, v in (("t", sensors["t"] - t0), ("obs", self.ctrl.last_obs), ("action", self.ctrl.last_action),
                              ("target", targets), ("q", sensors["q"]), ("qd", sensors["qd"]),
                              ("gravity", sensors["gravity"]), ("gyro", sensors["gyro"]), ("yaw", sensors["yaw"]),
-                             ("command", self.ctrl.command.copy())):
+                             ("command", self.ctrl.command.copy()), ("link_s", quiet)):
                     log[k].append(np.array(v, dtype=float))
             took = (time.perf_counter() - start) * 1000
             log["tick_ms"].append(took)
@@ -198,6 +202,7 @@ class Walker:
                 time.sleep(-late)
             recent = log["tick_ms"][-50:]
             self.stats = {"ticks": ticks, "overruns": overruns, "tick_ms": sum(recent) / len(recent),
+                          "link_s": time.monotonic() - self.last_link, "link_max": link_max,
                           "tick_max": max(recent), "command": self.ctrl.command.tolist(), "seconds": ticks * dt}
         self.running = False
         self._save(log)
@@ -214,6 +219,7 @@ class Walker:
 
     def state(self):
         return {"running": self.running, "status": self.status, "policy": self.policy_name,
+                "link_s": time.monotonic() - self.last_link, "link_limits": [LINK_STAND_S, LINK_STOP_S],
                 "policies": policies(), "default": default_policy(), "move_ms": self.move_ms, **self.stats,
                 "ranges": None if self.ctrl is None else {k: np.asarray(self.ctrl.policy.meta[k]).tolist()
                                                           for k in ("forward_range", "lateral_range", "yaw_rate_range")}}

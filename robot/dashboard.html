@@ -125,8 +125,9 @@ kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:
         <div class="sub" style="margin-top:8px">Start from Home (Boot first), robot standing or hanging. The command starts at
           "stand still". Steering: <kbd>&uarr;</kbd><kbd>&darr;</kbd> forward/back, <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn,
           <kbd>,</kbd><kbd>.</kbd> sideways, <kbd>space</kbd> stand still, <kbd>Esc</kbd> stop.
-          It stops by itself (servos hold) if a sensor goes quiet or the page is closed for 3 s
-          (it stands still after 1 s), and relaxes everything if it tilts past 40&deg;.</div>
+          It stops by itself (servos hold) if a sensor goes quiet or the page is closed for 6 s
+          (it stands still after 2 s), and relaxes everything if it tilts past 40&deg;.
+          <b>Keep this tab in front with the screen on</b>: browsers slow down background tabs.</div>
         <div class="sub" style="margin-top:6px">Servo move time per step
           <select id="wms" onchange="api('/policy/move_ms?ms=' + this.value)"><option value="0">0 ms (as in training)</option><option value="20">20 ms</option></select></div>
       </div>
@@ -460,8 +461,11 @@ function walker() {
   $('wcmd').textContent = W.running
     ? (cmd.every(v => v === 0) ? 'Stand still' : `fwd ${cmd[0].toFixed(2)} m/s \u00b7 side ${cmd[1].toFixed(2)} m/s \u00b7 turn ${cmd[2].toFixed(2)} rad/s`)
     : '-';
+  const linkCls = W.link_max > W.link_limits[0] ? 'bad' : W.link_max > 0.8 ? 'warn' : 'ok';
   $('wstats').innerHTML = W.ticks !== undefined
-    ? `${(W.seconds || 0).toFixed(0)} s \u00b7 step ${n1(W.tick_ms)} ms (max ${n1(W.tick_max)}) of 20 \u00b7 late ${W.overruns} times` + (W.log ? ` \u00b7 log ${W.log}` : '')
+    ? `${(W.seconds || 0).toFixed(0)} s \u00b7 step ${n1(W.tick_ms)} ms (max ${n1(W.tick_max)}) of 20 \u00b7 late ${W.overruns} times`
+      + ` \u00b7 link gap max <b class="${linkCls}">${n1(W.link_max, 1)} s</b> (stands still at ${W.link_limits[0]} s, stops at ${W.link_limits[1]} s)`
+      + (W.log ? ` \u00b7 log ${W.log}` : '')
     : '';
 }
 function clampCmd(k, v) {
@@ -518,6 +522,11 @@ function say() {
   const text = $('saytext').value.trim();
   if (text) api('/say?text=' + encodeURIComponent(text));
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && W && W.running) document.title = 'Juan: keep this tab open!';
+  else document.title = 'Juan dashboard';
+});
 
 async function poll() {
   try {

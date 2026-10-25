@@ -181,10 +181,12 @@ class BipedEnv(gym.Env):
         if isinstance(config, dict):
             config = EnvConfig.from_dict(config)
         self.cfg = cfg = config or EnvConfig()
-        # Without rendering, the visual-only CAD meshes are left out (~1.8 GB per environment for Juan;
-        # 18 training workers ran out of memory): same physics, see load_physics_model.
-        path = resolve_model_path(cfg.robot.model_path)
-        self.model = m = (mujoco.MjModel.from_xml_path(path) if render_mode else load_physics_model(path))
+        # The simulation leaves out the visual-only CAD meshes (~1.8 GB per environment for Juan: 18
+        # training workers ran out of memory) with identical physics (load_physics_model); render()
+        # loads the full model only when a frame is actually drawn. (Stable-Baselines3's make_vec_env
+        # asks every training environment for render_mode="rgb_array", though they never render.)
+        self._model_path = resolve_model_path(cfg.robot.model_path)
+        self.model = m = load_physics_model(self._model_path)
         self.data = mujoco.MjData(m)
         self.frame_skip = round(1.0 / (cfg.control_hz * m.opt.timestep))
         self.dt = self.frame_skip * m.opt.timestep
@@ -650,14 +652,19 @@ class BipedEnv(gym.Env):
         if self.render_mode != "rgb_array":
             return None
         if self._renderer is None:
-            self._renderer = mujoco.Renderer(self.model, *self._render_size)
+            # Drawn from the full model (with the CAD meshes), posed like the simulation each frame.
+            self._vis_model = mujoco.MjModel.from_xml_path(str(self._model_path))
+            self._vis_data = mujoco.MjData(self._vis_model)
+            self._renderer = mujoco.Renderer(self._vis_model, *self._render_size)
             self._camera = mujoco.MjvCamera()
             self._camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
             self._camera.trackbodyid = self.robot.root
             self._camera.distance = 4 * self.robot.home_height
             self._camera.elevation = -15
             self._camera.azimuth = 120
-        self._renderer.update_scene(self.data, camera=self._camera)
+        self._vis_data.qpos[:], self._vis_data.qvel[:] = self.data.qpos, self.data.qvel
+        mujoco.mj_forward(self._vis_model, self._vis_data)
+        self._renderer.update_scene(self._vis_data, camera=self._camera)
         self._draw_track_markers(self._renderer.scene)
         self._draw_push_arrow(self._renderer.scene)
         return self._renderer.render()

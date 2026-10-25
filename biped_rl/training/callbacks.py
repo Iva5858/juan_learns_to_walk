@@ -33,6 +33,8 @@ class TrainingDashboard(BaseCallback):
         "gait_shape": ("symmetry", "posture_symmetry", "step_timing", "gait_mismatch"),
     }
 
+    SAMPLE_EVERY = 4
+
     def __init__(self, cfg, log_details=False):
         super().__init__()
         self.dt = 1.0 / cfg.control_hz
@@ -49,36 +51,40 @@ class TrainingDashboard(BaseCallback):
         self._sums[key] = self._sums.get(key, 0.0) + float(value)
 
     def _on_step(self):
+        # Statistics from every SAMPLE_EVERY-th step (episode ends from every step): the per-robot Python
+        # bookkeeping was 16% of the training time; a quarter of the steps gives the same averages.
+        sample = self.n_calls % self.SAMPLE_EVERY == 0
         for info, done in zip(self.locals["infos"], self.locals["dones"]):
-            self._count += 1
-            self._add("2_commands/forward_error_mps", info["speed_error"])
-            self._add("2_commands/sideways_error_mps", abs(info["lateral_velocity"] - info["command_lateral"]))
-            self._add("2_commands/turn_rate_error_radps", abs(info["yaw_rate"] - info["command_yaw_rate"]))
-            self._add("2_commands/heading_error_deg", info["heading_error_deg"])
-            self._add("2_commands/path_drift_cm", 100 * info["lateral_offset"])
-            if info["command"] < -0.03:
-                self._backward += (info["forward_velocity"], info["command"])
-            self._add("1_overview/speed_error_mps", info["speed_error"])
-            self._add("1_overview/top_speed_command_mps", info["speed_max"])
-            self._add("1_overview/push_strength_mps_avg_direction", info["push_level_mean"])
-            self._add("1_overview/push_strength_mps_weakest_direction", info["push_level_min"])
-            self._add("1_overview/physics_difficulty", info["physics_difficulty"])
-            self._add("3_hardware/peak_torque_x_stall", info["peak_torque_stall"])
-            self._add("3_hardware/peak_joint_speed_x_servo_max", info["max_joint_speed_ratio"])
-            self._add("3_hardware/landing_force_x_body_weight", info["peak_force_bw"])
-            self._add("3_hardware/servo_saturation_pct", 100 * info["saturation"])
-            self._add("4_gait/double_support_pct", 100 * info["double_support"])
-            self._add("4_gait/flight_pct", 100 * info["flight"])
-            self._add("4_gait/action_change", info["action_delta"])
-            self._add("4_gait/body_height_m", info["base_height"])
-            self._add("5_rewards/kept_after_penalties", info["penalty_scale"])
-            for k, v in info.items():
-                if k.startswith("rew/") and getattr(self.weights, k[4:], 1.0) != 0:
-                    self._add(f"5_rewards/{k[4:]}", v)
-                elif k.startswith("pen/"):
-                    self._add(f"6_penalties/{self.group_of.get(k[4:], 'other')}", v)
-                    if self.log_details:
-                        self._add(f"7_penalty_details/{k[4:]}", v)
+            if sample:
+                self._count += 1
+                self._add("2_commands/forward_error_mps", info["speed_error"])
+                self._add("2_commands/sideways_error_mps", abs(info["lateral_velocity"] - info["command_lateral"]))
+                self._add("2_commands/turn_rate_error_radps", abs(info["yaw_rate"] - info["command_yaw_rate"]))
+                self._add("2_commands/heading_error_deg", info["heading_error_deg"])
+                self._add("2_commands/path_drift_cm", 100 * info["lateral_offset"])
+                if info["command"] < -0.03:
+                    self._backward += (info["forward_velocity"], info["command"])
+                self._add("1_overview/speed_error_mps", info["speed_error"])
+                self._add("1_overview/top_speed_command_mps", info["speed_max"])
+                self._add("1_overview/push_strength_mps_avg_direction", info["push_level_mean"])
+                self._add("1_overview/push_strength_mps_weakest_direction", info["push_level_min"])
+                self._add("1_overview/physics_difficulty", info["physics_difficulty"])
+                self._add("3_hardware/peak_torque_x_stall", info["peak_torque_stall"])
+                self._add("3_hardware/peak_joint_speed_x_servo_max", info["max_joint_speed_ratio"])
+                self._add("3_hardware/landing_force_x_body_weight", info["peak_force_bw"])
+                self._add("3_hardware/servo_saturation_pct", 100 * info["saturation"])
+                self._add("4_gait/double_support_pct", 100 * info["double_support"])
+                self._add("4_gait/flight_pct", 100 * info["flight"])
+                self._add("4_gait/action_change", info["action_delta"])
+                self._add("4_gait/body_height_m", info["base_height"])
+                self._add("5_rewards/kept_after_penalties", info["penalty_scale"])
+                for k, v in info.items():
+                    if k.startswith("rew/") and getattr(self.weights, k[4:], 1.0) != 0:
+                        self._add(f"5_rewards/{k[4:]}", v)
+                    elif k.startswith("pen/"):
+                        self._add(f"6_penalties/{self.group_of.get(k[4:], 'other')}", v)
+                        if self.log_details:
+                            self._add(f"7_penalty_details/{k[4:]}", v)
             if done:  # VecEnv: info of the final step; truncated = ran out of time = survived
                 end = ("survived" if info.get("TimeLimit.truncated") else
                        "broke" if info.get("broke", 0) > 0.5 else "fell")
@@ -131,21 +137,22 @@ class VideoRecorder(BaseCallback):
         obs, _ = self.env.reset(seed=0, options={"speed": speed})
         start_x = self.env.data.qpos[0]  # nominal physics: target direction is +x
         frames = [self.env.render()]
-        for _ in range(self.steps):
+        for i in range(self.steps):
             action, _ = self.model.predict(norm.normalize_obs(obs), deterministic=True)
             obs, _, terminated, truncated, _ = self.env.step(action)
-            frames.append(self.env.render())
+            if i % 2:  # 25 fps: drawing Juan's CAD meshes takes ~40 ms a frame on the CPU
+                frames.append(self.env.render())
             if terminated or truncated:
                 break
-        fps = round(1 / self.env.dt)
+        fps = round(1 / self.env.dt) // 2
         distance = self.env.data.qpos[0] - start_x
         frames = end_of_clip(frames, fps)
         self.logger.record("video/distance_m", distance)
-        self.logger.record("video/mean_speed", distance / (len(frames) * self.env.dt))
+        self.logger.record("video/mean_speed", distance / ((i + 1) * self.env.dt))
         self.video_dir.mkdir(parents=True, exist_ok=True)
         imageio.mimsave(self.video_dir / f"step_{self.num_timesteps // 1000:06d}k_cmd{speed:.2f}_walked{distance:.2f}m.mp4", frames, fps=fps)
-        video = torch.from_numpy(np.stack(frames)[::2]).permute(0, 3, 1, 2).unsqueeze(0)  # (1,T,C,H,W)
-        self.logger.record("video/walk", Video(video, fps=fps // 2), exclude=("stdout", "log", "json", "csv"))
+        video = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2).unsqueeze(0)  # (1,T,C,H,W)
+        self.logger.record("video/walk", Video(video, fps=fps), exclude=("stdout", "log", "json", "csv"))
         imageio.mimsave(self.video_dir / "latest.mp4", frames, fps=fps)
         return True
 

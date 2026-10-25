@@ -25,7 +25,7 @@ from biped_rl.robots import portable_model_path
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 from biped_rl.tasks.locomotion.env_cfg import RewardWeights, RobotConfig
 from biped_rl.training.callbacks import SaveVecNormalize, TrainingDashboard, VideoRecorder
-from biped_rl.training.ppo import new_model
+from biped_rl.training.ppo import n_steps_for, new_model
 from biped_rl.training.stages import STAGES, apply_stage, load_curriculum, save_curriculum
 
 
@@ -42,7 +42,8 @@ def main():
     p.add_argument("--model", help="MJCF of the robot (default: Juan)")
     p.add_argument("--feet", nargs=2, help="left and right foot body names")
     p.add_argument("--timesteps", type=int, default=30_000_000)
-    p.add_argument("--n-envs", type=int, default=os.cpu_count())
+    p.add_argument("--n-envs", type=int, default=2 * os.cpu_count(),
+                   help="simulation workers (default 2 x cores: 36 on this Mac was 43%% faster than 18)")
     p.add_argument("--max-speed", type=float, help="upper end of the speed command [m/s]")
     p.add_argument("--swing-ratio", type=float, help=">0.5 gives a flight phase (running)")
     p.add_argument("--no-joint-feedback", action="store_true", help="servos cannot report their angle")
@@ -115,10 +116,13 @@ def main():
 
     if args.resume:
         env = VecNormalize.load(str(Path(args.resume) / "vecnormalize.pkl"), env)
-        custom = {"learning_rate": args.lr} if args.lr else None
+        custom = {"n_steps": n_steps_for(args.n_envs)}  # same samples per update with any worker count
+        if args.lr:
+            custom["learning_rate"] = args.lr
         model = PPO.load(Path(args.resume) / "final_model", env=env, device="cpu",
                          tensorboard_log=str(run_dir), custom_objects=custom)
-        print(f"resumed from {args.resume}, learning rate {model.learning_rate}", flush=True)
+        print(f"resumed from {args.resume}, learning rate {model.learning_rate}, "
+              f"{args.n_envs} workers x {model.n_steps} steps per update", flush=True)
         if args.stage:
             with torch.no_grad():
                 model.policy.log_std.clamp_(min=float(np.log(args.min_std)))
