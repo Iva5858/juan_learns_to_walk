@@ -1,5 +1,7 @@
 # Juan learns to walk
 
+https://github.com/user-attachments/assets/202719be-8dfd-47bc-9f9c-f82c3124f422
+
 Reinforcement learning for **Juan**, a 43 cm, 8-servo biped. The policy is trained in MuJoCo with PPO and runs on the real robot's Raspberry Pi, steered from a web dashboard.
 
 **Status (October 2026):** Juan walks on the real robot at up to 0.2 m/s, turns, side-steps and survives light shoves, with the policy in `robot/policies/juan_v7_12b_pushes_best.npz`. It weaves left and right while walking straight. The fine-tune for that (v7_13) trains on the servo model fitted from the robot's own walking logs.
