@@ -1,0 +1,63 @@
+{
+ "joints": {
+  "left_hip_roll": {
+   "zero": 576,
+   "sign": -1,
+   "lo": 595,
+   "hi": 457
+  },
+  "left_hip_pitch": {
+   "zero": 508,
+   "sign": 1,
+   "lo": 119,
+   "hi": 618
+  },
+  "left_knee": {
+   "zero": 464,
+   "sign": 1,
+   "lo": 346,
+   "hi": 807
+  },
+  "left_ankle": {
+   "zero": 547,
+   "sign": 1,
+   "lo": 256,
+   "hi": 876
+  },
+  "right_hip_roll": {
+   "zero": 672,
+   "sign": -1,
+   "lo": 768,
+   "hi": 651
+  },
+  "right_hip_pitch": {
+   "zero": 315,
+   "sign": -1,
+   "lo": 687,
+   "hi": 222
+  },
+  "right_knee": {
+   "zero": 645,
+   "sign": -1,
+   "lo": 753,
+   "hi": 243
+  },
+  "right_ankle": {
+   "zero": 614,
+   "sign": -1,
+   "lo": 889,
+   "hi": 307
+  }
+ },
+ "zero_set": true,
+ "imu_bus": 1,
+ "imu_axes": [
+  "y",
+  "x",
+  "z"
+ ],
+ "imu_level": [
+  -0.9292886064357991,
+  0.20449559421135335
+ ]
+}
