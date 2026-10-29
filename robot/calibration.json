@@ -1,52 +1,52 @@
 {
  "joints": {
   "left_hip_roll": {
-   "zero": 576,
+   "zero": 561,
    "sign": -1,
-   "lo": 595,
-   "hi": 457
+   "lo": 596,
+   "hi": 451
   },
   "left_hip_pitch": {
-   "zero": 508,
+   "zero": 533,
    "sign": 1,
-   "lo": 119,
-   "hi": 618
+   "lo": 53,
+   "hi": 840
   },
   "left_knee": {
-   "zero": 464,
+   "zero": 447,
    "sign": 1,
-   "lo": 346,
-   "hi": 807
+   "lo": 62,
+   "hi": 968
   },
   "left_ankle": {
-   "zero": 547,
+   "zero": 566,
    "sign": 1,
-   "lo": 256,
-   "hi": 876
+   "lo": 206,
+   "hi": 895
   },
   "right_hip_roll": {
-   "zero": 672,
+   "zero": 659,
    "sign": -1,
    "lo": 768,
-   "hi": 651
+   "hi": 635
   },
   "right_hip_pitch": {
-   "zero": 315,
+   "zero": 309,
    "sign": -1,
-   "lo": 687,
-   "hi": 222
+   "lo": 825,
+   "hi": -16
   },
   "right_knee": {
-   "zero": 645,
+   "zero": 640,
    "sign": -1,
-   "lo": 753,
-   "hi": 243
+   "lo": 829,
+   "hi": 144
   },
   "right_ankle": {
-   "zero": 614,
+   "zero": 567,
    "sign": -1,
-   "lo": 889,
-   "hi": 307
+   "lo": 897,
+   "hi": 243
   }
  },
  "zero_set": true,
@@ -57,7 +57,7 @@
   "z"
  ],
  "imu_level": [
-  -0.9292886064357991,
-  0.20449559421135335
+  -0.8180726924117135,
+  1.779747947794905
  ]
 }
