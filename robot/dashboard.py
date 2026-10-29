@@ -52,6 +52,7 @@ class Robot:
         self.walker.listener = self.personality.walker_event
         self.scan()
         self.imu = IMU(self.cal.imu_bus, self.cal.imu_axes)
+        self.camera.configure_stabilization(self.imu)
         threading.Thread(target=self._pi_loop, daemon=True).start()
 
     # ---------------------------------------------------------------- servos
@@ -327,7 +328,10 @@ class Robot:
                           "read_ms": self.imu.read_ms},
             "walker": self.walker.state(),
             "personality": self.personality.state(),
-            "camera": {"available": Camera.available, "error": self.camera.error},
+            "camera": {"available": Camera.available, "error": self.camera.error,
+                       "stabilization_configured": self.camera.stabilizer is not None,
+                       "stabilization_corrected": self.camera.corrected,
+                       "stabilization_error": self.camera.stabilization_error},
             "limits": {"servo_temp": SERVO_TEMP_LIMIT, "pi_temp": PI_TEMP_LIMIT},
         }
 
@@ -347,13 +351,15 @@ class Handler(BaseHTTPRequestHandler):
     def result(self, error=None, **extra):
         self.reply(200 if error is None else 409, json.dumps({"error": error, **extra}).encode())
 
-    def camera(self):
+    def camera(self, stabilized=False):
+        if stabilized and robot.camera.stabilizer is None:
+            return self.reply(409, b"Camera stabilization requires calibration and OpenCV", "text/plain")
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         try:
-            for frame in robot.camera.stream():
+            for frame in robot.camera.stream(stabilized=stabilized):
                 self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(frame))
                 self.wfile.write(frame + b"\r\n")
         except (BrokenPipeError, ConnectionResetError):
@@ -375,6 +381,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, json.dumps(robot.state()).encode())
             elif p == "/camera.mjpg":
                 self.camera()
+            elif p == "/camera-stabilized.mjpg":
+                self.camera(stabilized=True)
             elif p == "/scan":
                 self.result(found=robot.scan())
             elif p == "/move":

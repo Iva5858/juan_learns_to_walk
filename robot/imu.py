@@ -13,6 +13,8 @@ import math
 import threading
 import time
 
+from robot.stabilization import OrientationHistory, sensor_time
+
 RATE_HZ = 200
 TAU_S = 0.5           # accelerometer correction time constant
 ACCEL_TRUST = 0.15    # use the accelerometer only within +-15% of 1 g (not during impacts)
@@ -130,6 +132,7 @@ class IMU:
         self.gyro_bias = [0.0, 0.0, 0.0]
         self._bias_samples, self._bias_until = [], 0.0
         self._lock = threading.Lock()
+        self.orientation = OrientationHistory()
         self.filter = GravityFilter()
         self.gyro_lowpass_hz = GYRO_LOWPASS_HZ
         self._gyro_f = None
@@ -152,6 +155,7 @@ class IMU:
     def reset(self):
         with self._lock:
             self.filter = GravityFilter()  # restart the estimate from the accelerometer
+            self.orientation.clear()
 
     def _close(self):
         if self.device is not None:
@@ -185,8 +189,10 @@ class IMU:
             t0 = time.perf_counter()
             self.reads += 1
             try:
+                sample_start = sensor_time()
                 accel, gyro = self.device.read()
-                self._update(remap(accel, self.axes), remap(gyro, self.axes), dt)
+                sample_time = 0.5 * (sample_start + sensor_time())
+                self._update(remap(accel, self.axes), remap(gyro, self.axes), dt, sample_time)
             except OSError as e:
                 self.failures += 1
                 self.error = str(e)
@@ -199,7 +205,7 @@ class IMU:
             if time.monotonic() - next_t > 0.1:  # fell far behind (Pi busy): don't try to catch up
                 next_t = time.monotonic()
 
-    def _update(self, accel, gyro, dt):
+    def _update(self, accel, gyro, dt, timestamp=None):
         with self._lock:
             now = time.monotonic()
             if now < self._bias_until:
@@ -209,6 +215,7 @@ class IMU:
                 self.gyro_bias = [sum(s[k] for s in self._bias_samples) / n for k in range(3)]
                 self._bias_samples = []
             gyro = [gyro[k] - self.gyro_bias[k] for k in range(3)]
+            self.orientation.append(sensor_time() if timestamp is None else timestamp, gyro)
             g = self.filter.update(accel, gyro, dt)
         if g is not None:
             self._publish(g, gyro, self.filter.a_norm)

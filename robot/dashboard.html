@@ -110,6 +110,9 @@ kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:
   </div>
   <div class="card">
     <div class="top"><div class="label">Camera</div><button class="small" id="camBtn" onclick="toggleCam()">Show</button></div>
+    <label class="sub">View <select id="camView" onchange="setCamView()" disabled>
+      <option value="raw">Raw</option><option value="stabilized">Stabilized</option>
+    </select></label>
     <img class="cam" id="cam" alt="" hidden>
     <div class="sub" id="camnote">Off until shown (the stream costs CPU).</div>
   </div>
@@ -427,14 +430,29 @@ let camOn = false;
 function toggleCam() {
   camOn = !camOn;
   $('cam').hidden = !camOn;
-  $('cam').src = camOn ? '/camera.mjpg?' + Date.now() : '';
+  setCamView();
   $('camBtn').textContent = camOn ? 'Hide' : 'Show';
+  camNote();
+}
+function setCamView() {
+  const endpoint = $('camView').value === 'stabilized' ? '/camera-stabilized.mjpg' : '/camera.mjpg';
+  $('cam').src = camOn ? endpoint + '?' + Date.now() : '';
   camNote();
 }
 function camNote() {
   const c = S && S.camera;
+  $('camView').disabled = !(c && c.stabilization_configured);
+  if ($('camView').disabled && $('camView').value !== 'raw') {
+    $('camView').value = 'raw';
+    setCamView();
+    return;
+  }
+  const stabilized = $('camView').value === 'stabilized';
   $('camnote').textContent = c && !c.available ? 'Camera unavailable: ' + c.error
     : c && c.error && camOn ? 'Camera error: ' + c.error
+    : c && c.stabilization_error ? 'Stabilized view unavailable: ' + c.stabilization_error
+    : camOn && stabilized ? (c && c.stabilization_corrected ? 'Stabilization active.' : 'Waiting for matching motion readings; showing raw frames.')
+    : !camOn && $('camView').disabled ? 'Off. Stabilized view needs camera setup.'
     : camOn ? '640×480, 15 fps, hardware MJPEG' : 'Off until shown (the stream costs CPU).';
 }
 function setAxes() { api('/cal/imu?axes=' + ['ax0', 'ax1', 'ax2'].map(id => $(id).value).join(',')); }
