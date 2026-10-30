@@ -75,6 +75,7 @@ class DomainState:
 class CommandState:
     vec: np.ndarray = field(default_factory=lambda: np.zeros(3))  # forward, sideways, turn rate
     standing: bool = False
+    stand_since: float = 0.0    # episode time the current stand command began
     fixed: bool = False         # no new commands this episode
     next_resample: float = np.inf
     max_forward: float = -np.inf
@@ -598,6 +599,7 @@ class BipedEnv(gym.Env):
             ang_world=R @ d.qvel[3:6], qd=qd, qacc=qacc, q=q, touchdowns=touchdowns, reversals=reversals,
             sole_vel=sole_vel, swing=swing, bad_contact=bad_contact, new_td=new_td,
             air_at_touchdown=air_at_touchdown, step_at_touchdown=step_at_touchdown,
+            feet_x=(R.T @ (d.xpos[robot.foot_bodies[0]] - d.xpos[robot.foot_bodies[1]]))[0],
             feet_y=(R.T @ (d.xpos[robot.foot_bodies[0]] - d.xpos[robot.foot_bodies[1]]))[1],
             peak_force=phys.peak_force, saturated=phys.saturated, overload=phys.overload,
             overspeed=phys.overspeed, peak_tau=phys.peak_tau, peak_speed_ratio=phys.peak_speed_ratio,
@@ -610,6 +612,10 @@ class BipedEnv(gym.Env):
 
     def set_curriculum_state(self, state):
         curriculums.set_state(self, state)
+
+    def set_speed_max(self, speed):
+        """Set the top of the forward-speed range directly (training's --speed-ramp)."""
+        self.curriculum.speed_max = float(speed)
 
     def set_command(self, forward, sideways=0.0, turn_rate=0.0):
         """Change the command mid-episode (keyboard, joystick). All zero = stand still."""

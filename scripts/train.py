@@ -22,7 +22,14 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
-from biped_rl.training.callbacks import CurriculumSnapshot, SaveVecNormalize, TrainingDashboard, VideoRecorder
+from biped_rl.training.callbacks import (
+    CurriculumSnapshot,
+    SaveVecNormalize,
+    SpeedProbe,
+    SpeedRamp,
+    TrainingDashboard,
+    VideoRecorder,
+)
 from biped_rl.training.ppo import n_steps_for, new_model
 from biped_rl.training.stages import STAGES, apply_stage, load_curriculum, save_curriculum
 
@@ -48,6 +55,13 @@ def main():
     p.add_argument("--stage", choices=STAGES, help="training stage (see apply_stage); with --resume for "
                    "all but the first")
     p.add_argument("--video-every", type=int, default=1_000_000, help="steps between walking clips")
+    p.add_argument("--video", choices=("walk", "stand"), default="walk",
+                   help="what the clips show: walking, or stopping and being shoved while standing")
+    p.add_argument("--video-shove", type=float, default=0.4, help="with --video stand: shove strength [m/s]")
+    p.add_argument("--speed-ramp", help="START,END: raise the top speed command linearly over the run (m/s), "
+                   "whatever the speed curriculum would do (with --speed-probe-every: where does it top out?)")
+    p.add_argument("--speed-probe-every", type=int, default=0,
+                   help="steps between measurements of the speed reached at 0.2-1.2 m/s commands (speed_probe.csv)")
     p.add_argument("--log-details", action="store_true",
                    help="also chart every single penalty term (for reward tuning)")
     p.add_argument("--lr", type=float, help="learning rate (with --resume: overrides the saved one; "
@@ -113,13 +127,18 @@ def main():
     callbacks = [
         curriculum,
         TrainingDashboard(cfg, log_details=args.log_details),
-        VideoRecorder(cfg, run_dir / "videos", freq=args.video_every),
+        VideoRecorder(cfg, run_dir / "videos", freq=args.video_every, mode=args.video, shove=args.video_shove),
         CheckpointCallback(save_freq=max(2_000_000 // args.n_envs, 1),
                            save_path=str(run_dir / "checkpoints"), save_vecnormalize=True),
         EvalCallback(eval_env, n_eval_episodes=10, eval_freq=max(1_000_000 // args.n_envs, 1),
                      best_model_save_path=str(run_dir), log_path=str(run_dir), deterministic=True,
                      callback_on_new_best=SaveVecNormalize(str(run_dir / "best_vecnormalize.pkl"))),
     ]
+    if args.speed_ramp:
+        start, end = (float(v) for v in args.speed_ramp.split(","))
+        callbacks.append(SpeedRamp(start, end, args.timesteps))
+    if args.speed_probe_every:
+        callbacks.append(SpeedProbe(cfg, run_dir / "speed_probe.csv", args.speed_probe_every))
     try:
         model.learn(total_timesteps=args.timesteps, callback=callbacks,
                     reset_num_timesteps=not args.resume)

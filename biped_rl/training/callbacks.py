@@ -120,10 +120,20 @@ class VideoRecorder(BaseCallback):
     curriculum's top, and, if it trains on backward commands, walking backward at its top backward speed.
 
     The forward clip goes to TensorBoard (IMAGES tab, as an animation); both go to <run>/videos/.
-    """
 
-    def __init__(self, cfg, video_dir, freq, seconds=8.0, size=(240, 320)):
+    mode="stand" films standing instead (STAND_SCRIPT): stopping from a walk forward and backward, and a
+    shove of `shove` m/s from behind, in front and the side while standing; the file name says whether it
+    stayed up and how far one foot ended ahead of the other.
+    """
+    # (seconds, event): ("walk", forward m/s) / ("stop",) / ("shove", direction deg, robot frame: 0 = pushed
+    # forward, 180 = backward, 90 = to its left) / ("end",)
+    STAND_SCRIPT = ((0.0, ("walk", 0.2)), (1.5, ("stop",)), (3.0, ("shove", 180)), (5.0, ("shove", 0)),
+                    (6.5, ("walk", -0.15)), (8.0, ("stop",)), (9.5, ("shove", 180)), (11.5, ("shove", 90)),
+                    (13.5, ("end",)))
+
+    def __init__(self, cfg, video_dir, freq, seconds=8.0, size=(240, 320), mode="walk", shove=0.4):
         super().__init__()
+        self.mode, self.shove = mode, shove
         cfg = EnvConfig.from_dict(cfg.to_dict())
         cfg.randomization.enabled = False
         self.delay = int(cfg.randomization.action_delay_steps[0])
@@ -148,12 +158,60 @@ class VideoRecorder(BaseCallback):
                 break
         return frames, self.env.data.qpos[0] - start_x, (i + 1) * self.env.dt
 
+    def _stand_clip(self):
+        """Film STAND_SCRIPT. Returns (frames, seconds until it fell or None, one foot ahead of the other at
+        the end [m])."""
+        env, norm = self.env, self.model.get_vec_normalize_env()
+        script = list(self.STAND_SCRIPT)
+        obs, _ = env.reset(seed=0, options={"command": (script.pop(0)[1][1], 0.0, 0.0)})
+        env.servo.action_delay = self.delay
+        frames, fell, i = [env.render()], None, 0
+        while script:
+            if env.episode.t >= script[0][0]:
+                event = script.pop(0)[1]
+                if event[0] == "end":
+                    break
+                if event[0] == "walk":
+                    env.set_command(event[1])
+                elif event[0] == "stop":
+                    env.set_command(0.0)
+                else:
+                    angle = env.yaw() + np.radians(event[1])
+                    env.episode.last_push_vec = self.shove * np.array([np.cos(angle), np.sin(angle)])
+                    env.data.qvel[0:2] += env.episode.last_push_vec
+                    env.episode.last_push = env.episode.t
+            action, _ = self.model.predict(norm.normalize_obs(obs), deterministic=True)
+            obs, _, terminated, truncated, _ = env.step(action)
+            i += 1
+            if i % 2:
+                frames.append(env.render())
+            if terminated:
+                fell = env.episode.t
+                break
+            if truncated:
+                break
+        feet, yaw = env.data.xpos[env.robot.foot_bodies], env.yaw()
+        ahead = np.cos(yaw) * (feet[0, 0] - feet[1, 0]) + np.sin(yaw) * (feet[0, 1] - feet[1, 1])
+        return frames, fell, abs(float(ahead))
+
     def _on_step(self):
         if self.num_timesteps - self._last < self.freq:
             return True
         self._last = self.num_timesteps
         fps = round(1 / self.env.dt) // 2
         self.video_dir.mkdir(parents=True, exist_ok=True)
+        if self.mode == "stand":
+            frames, fell, stagger = self._stand_clip()
+            frames = end_of_clip(frames, fps)
+            outcome = f"fell{fell:.1f}s" if fell is not None else f"stood_stagger{100 * stagger:.0f}cm"
+            self.logger.record("video/stand_fell", float(fell is not None))
+            self.logger.record("video/stand_stagger_cm", 100 * stagger)
+            imageio.mimsave(self.video_dir / f"step_{self.num_timesteps // 1000:06d}k_stand_shove{self.shove:.2f}_{outcome}.mp4",
+                            frames, fps=fps)
+            video = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2).unsqueeze(0)
+            self.logger.record("video/stand", Video(video, fps=fps), exclude=("stdout", "log", "json", "csv"))
+            imageio.mimsave(self.video_dir / "latest.mp4", frames, fps=fps)
+            return True
         speed = max(st["speed_max"] for st in self.training_env.env_method("curriculum_state"))
         frames, distance, seconds = self._clip(speed)
         frames = end_of_clip(frames, fps)
@@ -186,6 +244,73 @@ class CurriculumSnapshot(BaseCallback):
         self.states = self.training_env.env_method("curriculum_state")
 
     def _on_step(self):
+        return True
+
+
+class SpeedRamp(BaseCallback):
+    """Raise the top forward-speed command linearly from `start` to `end` m/s over the run (in 0.05 m/s
+    steps), whatever the speed curriculum would do: with SpeedProbe, shows where the robot tops out."""
+
+    def __init__(self, start, end, total_steps):
+        super().__init__()
+        self.start, self.end, self.total = start, end, total_steps
+        self._t0 = None
+
+    def _on_rollout_start(self):
+        if self._t0 is None:
+            self._t0 = self.num_timesteps
+        frac = min(1.0, (self.num_timesteps - self._t0) / max(self.total, 1))
+        speed = round((self.start + frac * (self.end - self.start)) / 0.05) * 0.05
+        self.training_env.env_method("set_speed_max", speed)
+        self.logger.record("1_overview/speed_ramp_mps", speed)
+
+    def _on_step(self):
+        return True
+
+
+class SpeedProbe(BaseCallback):
+    """Every `freq` steps, the speed the current policy actually reaches at fixed forward commands, on
+    randomized robots without shoves: a row in <run>/speed_probe.csv and charts in TensorBoard (speed_probe/)."""
+
+    COMMANDS = (0.2, 0.4, 0.6, 0.8, 1.0, 1.2)
+
+    def __init__(self, cfg, path, freq, seeds=2, seconds=10.0):
+        super().__init__()
+        cfg = EnvConfig.from_dict(cfg.to_dict())
+        cfg.randomization.push_velocity = 0.0
+        cfg.randomization.physics_curriculum = False
+        self.cfg, self.path, self.freq, self.seeds, self.seconds = cfg, Path(path), freq, seeds, seconds
+        self._last = None
+
+    def _on_step(self):
+        if self._last is not None and self.num_timesteps - self._last < self.freq:
+            return True
+        self._last = self.num_timesteps
+        norm = self.model.get_vec_normalize_env()
+        ceiling = max(st["speed_max"] for st in self.training_env.env_method("curriculum_state"))
+        row = {"steps": self.num_timesteps, "ceiling_mps": round(ceiling, 3)}
+        for cmd in self.COMMANDS:
+            speeds, falls = [], 0
+            for seed in range(self.seeds):
+                env = BipedEnv(self.cfg.to_dict())
+                obs, _ = env.reset(seed=500 + seed, options={"command": (cmd, 0.0, 0.0)})
+                p0, y0 = env.data.qpos[:2].copy(), env.yaw()
+                for _ in range(int(self.seconds / env.dt)):
+                    action, _ = self.model.predict(norm.normalize_obs(obs), deterministic=True)
+                    obs, _, terminated, _, _ = env.step(action)
+                    if terminated:
+                        falls += 1
+                        break
+                speeds.append(env.moved_since(p0, y0)[0] / env.episode.t)
+            row[f"reached_at_{cmd:.1f}"] = round(float(np.mean(speeds)), 3)
+            row[f"falls_at_{cmd:.1f}"] = falls
+            self.logger.record(f"speed_probe/reached_mps_at_{cmd:.1f}", float(np.mean(speeds)))
+        self.logger.record("speed_probe/best_reached_mps", max(row[f"reached_at_{c:.1f}"] for c in self.COMMANDS))
+        new = not self.path.exists()
+        with open(self.path, "a") as f:
+            if new:
+                f.write(",".join(row) + "\n")
+            f.write(",".join(str(v) for v in row.values()) + "\n")
         return True
 
 

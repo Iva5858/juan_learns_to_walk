@@ -19,6 +19,7 @@ def reset(env, options):
         cmd.vec = np.array([float(options["speed"]), 0.0, 0.0])
     else:
         sample(env)
+    cmd.stand_since = 0.0
     cmd.max_forward = max(cmd.max_forward, cmd.forward)
     cmd.next_resample = rng.uniform(*cfg.resample_interval)
 
@@ -28,7 +29,10 @@ def sample(env):
     [-backward_speed, top of the speed curriculum]; a share of commands is straight walking, and
     share each only turns, only walks backward, or only walks sideways."""
     c, rng, cmd = env.cfg.command, env.np_random, env.command
+    was_standing = cmd.standing
     cmd.standing = bool(rng.uniform() < c.stand_prob)
+    if cmd.standing and not was_standing and hasattr(env, "episode"):
+        cmd.stand_since = env.episode.t  # stopping from a walk
     # One draw picks the kind of command (no draw when all shares are off: the walk stage).
     shares = np.cumsum([c.turn_in_place_prob, c.backward_prob, c.sideways_prob]
                        + ([c.fast_prob] if c.fast_prob > 0 else []))
@@ -67,6 +71,8 @@ def set_command(env, forward, sideways=0.0, turn_rate=0.0):
     """Change the command mid-episode (keyboard, joystick). All zero = stand still."""
     cmd = env.command
     cmd.vec = np.array([forward, sideways, turn_rate], dtype=float)
+    if not np.any(cmd.vec) and not cmd.standing:
+        cmd.stand_since = env.episode.t
     cmd.standing = not np.any(cmd.vec)
 
 

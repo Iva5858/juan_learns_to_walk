@@ -102,3 +102,25 @@ def test_double_support_only_when_a_foot_should_swing():
     env = fake_env(0.0, standing=True)
     env.episode, s = swing_state((0, 0), (1, 1), (True, False))
     assert rewards.double_support(env, s, w) == 0.0                  # told to stand
+
+
+def test_stand_feet_charges_a_split_stance_only_when_standing():
+    w = RewardWeights(stand_feet=1.0)
+    s = SimpleNamespace(feet_x=0.05)
+    assert np.isclose(rewards.stand_feet(fake_env(0.0, standing=True), s, w), 1.0)
+    assert np.isclose(rewards.stand_feet(fake_env(0.0, standing=True), SimpleNamespace(feet_x=-0.5), w), 2.0)  # capped
+    assert rewards.stand_feet(fake_env(0.2), s, w) == 0.0
+    assert rewards.stand_feet(fake_env(0.0, standing=True), s, RewardWeights()) == 0.0   # off by default
+
+
+def test_stopping_starts_the_settle_window():
+    cfg = EnvConfig()
+    cfg.rewards.stand_settle_s = 1.0
+    env = BipedEnv(cfg.to_dict())
+    env.reset(seed=0, options={"command": (0.2, 0.0, 0.0)})
+    for _ in range(50):
+        env.step(np.zeros(env.nu))
+    env.set_command(0.0)
+    assert env.command.standing and np.isclose(env.command.stand_since, env.episode.t)
+    env.reset(seed=1, options={"stand": True})
+    assert env.command.stand_since == 0.0

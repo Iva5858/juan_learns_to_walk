@@ -100,6 +100,7 @@ class RewardWeights:
     path_offset: float = 2.0                # distance^2 from the commanded path [m^2] (0.02 at 10 cm)
     stand_still: float = 1.0                # moving < 50% of a walking command (0 at half speed, 1 stopped)
     stand_pose: float = 20.0                # commanded to stand: joints away from home, mean [rad^2]
+    stand_feet: float = 0.0                 # commanded to stand: one foot ahead of the other, per 5 cm
                                             # (7 deg off costs ~0.26, 2 deg of balancing ~0.02)
     # posture
     orientation: float = 2.0                # torso tilt (roll, pitch)
@@ -134,6 +135,8 @@ class RewardWeights:
     footstep: float = 1.0                   # steps beyond the gait clock's: fewer steps, fewer impacts
     reversals: float = 0.1                  # per servo direction reversal (backlash hammering, pot wear)
     double_support: float = 0.0             # both feet loaded while the clock says one should swing (0 = off)
+    stand_settle_s: float = 0.0             # s after a stand command when the gait penalties stay paused, so
+                                            # it can step its feet square after stopping a walk; 0 = off
     recover_tilt_deg: float = 8.0           # torso tilt counted as recovering (gait penalties paused); juan_v7_15d: 20
     # --- hardware limits: crossing one ends the episode like a fall (the robot "broke") ---
     break_impact: float = 3.0               # landing above this x body weight

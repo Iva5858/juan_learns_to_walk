@@ -6,6 +6,7 @@ falls, torso lean, how often both feet are on the ground, and how high the feet 
 
     python scripts/analysis/speeds.py checkpoints/juan_v7_13_straight runs/juan_v7_16_best
     python scripts/analysis/speeds.py runs/a --json out/a_speeds.json     # also save the numbers
+    python scripts/analysis/speeds.py runs/a --fast                       # also 0.6-1.2 m/s commands
 """
 import argparse
 import json
@@ -18,15 +19,16 @@ from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 
 FORWARD = (0.1, 0.2, 0.3, 0.4)
 BACKWARD = (-0.1, -0.15, -0.2)
+FAST = (0.6, 0.8, 1.0, 1.2)  # with --fast (not in the summary shares, so runs stay comparable)
 
 
-def measure(run, seeds=6, seconds=10.0, best=False):
+def measure(run, seeds=6, seconds=10.0, best=False, fast=False):
     cfg = EnvConfig.load(run).use_measured_servos()
     cfg.randomization.push_velocity = 0.0
     cfg.randomization.physics_curriculum = False
     model, norm = load_policy(run, cfg, best=best)
     rows = {}
-    for cmd in FORWARD + BACKWARD:
+    for cmd in FORWARD + BACKWARD + (FAST if fast else ()):
         speed, falls, lean, both, lift, n = [], 0, [], 0, [], 0
         for seed in range(seeds):
             env = BipedEnv(cfg.to_dict())
@@ -63,11 +65,12 @@ def main():
     p.add_argument("--seeds", type=int, default=6)
     p.add_argument("--best", action="store_true", help="the runs' best_model instead of final_model")
     p.add_argument("--json", help="save every number to this file")
+    p.add_argument("--fast", action="store_true", help="also commands of 0.6, 0.8, 1.0 and 1.2 m/s")
     a = p.parse_args()
     out = {}
     print(f"{'policy':30s} {'command':>8s} {'reached':>8s} {'share':>6s} {'falls':>6s} {'lean':>6s} {'both feet':>9s} {'lift':>7s}")
     for run in a.runs:
-        rows = measure(run, a.seeds, best=a.best)
+        rows = measure(run, a.seeds, best=a.best, fast=a.fast)
         for cmd, r in rows.items():
             print(f"{Path(run).name:30s} {cmd:+8.2f} {r['speed']:+8.3f} {100 * r['share']:5.0f}% {r['falls']:3d}/{r['episodes']:<2d}"
                   f" {r['lean_deg']:5.1f}° {r['both_feet_pct']:8.0f}% {r['lift_mm']:5.1f}mm", flush=True)

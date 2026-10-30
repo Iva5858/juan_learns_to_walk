@@ -251,6 +251,14 @@ def stand_pose(env, s, w):
     return w.stand_pose * float(np.mean((s.q - env.robot.home_joint) ** 2))
 
 
+def stand_feet(env, s, w):
+    """Commanded to stand: one foot ahead of the other (stopped mid-stride and stayed there), per 5 cm.
+    stand_pose alone let the policy keep the split stance rather than take the steps that square it."""
+    if w.stand_feet == 0 or not env.command.standing:
+        return 0.0
+    return w.stand_feet * min(abs(s.feet_x), 0.1) / 0.05
+
+
 def stand_still(env, s, w):
     """Not moving while commanded to walk, forward or backward: 0 at >= half the commanded speed, 1 when
     stopped. Slow commands count too: from 0.05 m/s (above 0.1 only, the policy learned to stand still
@@ -265,12 +273,13 @@ PENALTY_TERMS = (path_offset, orientation, ang_vel_xy, lin_vel_z, base_height, k
                  hip_roll, hip_roll_inward, action_rate, action_acc, joint_acc, servo_load,
                  servo_saturation, servo_overload, backdrive, impact, foot_slip, joint_limits,
                  feet_distance, energy, symmetry, gait_mismatch, footstep, reversals, stand_still, stand_pose,
-                 double_support)
+                 stand_feet, double_support)
 
-# Free while recovering (1 s after a shove, or the torso tilted beyond recover_tilt_deg): otherwise they
-# punish the quick extra step that catches a fall. A threshold the robot can lean past all the time is a
+# Free while recovering (1 s after a shove, the torso tilted beyond recover_tilt_deg, or stand_settle_s after
+# a stop): otherwise they punish the quick extra step that catches a fall or squares the feet. A threshold the robot can lean past all the time is a
 # loophole: juan_v7_15c leaned 9.4 deg (66% of steps past 8) to switch them off.
-PAUSED_WHILE_RECOVERING = ("symmetry", "gait_mismatch", "footstep", "reversals", "stand_pose", "double_support")
+PAUSED_WHILE_RECOVERING = ("symmetry", "gait_mismatch", "footstep", "reversals", "stand_pose", "stand_feet",
+                           "double_support")
 
 
 def compute(env, s):
@@ -291,6 +300,7 @@ def compute(env, s):
     task = {k: s.tracking * v for k, v in task.items()}
     pen = {f.__name__: f(env, s, w) for f in PENALTY_TERMS}
     s.recovering = (env.episode.t - env.episode.last_push < 1.0) or np.linalg.norm(s.grav[:2]) > np.sin(np.radians(w.recover_tilt_deg))
+    s.recovering |= env.command.standing and env.episode.t - env.command.stand_since < w.stand_settle_s
     if s.recovering:
         for k in PAUSED_WHILE_RECOVERING:
             pen[k] = 0.0

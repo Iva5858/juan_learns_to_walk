@@ -27,6 +27,13 @@
 #              lin_vel_z=0.2 footstep=0.5 gait_mismatch=0.3 foot_slip=4.0
 # juan_v7_15d: the same, with gait penalties paused only after a shove or a real stumble (tilt over 20 deg),
 # not a constant lean: add recover_tilt_deg=20
+# juan_v7_20_stand (standing: stronger shoves from every side, stopping from a walk with the feet square):
+#   FROM=runs/juan_v7_19_topspeed_best STEPS=20000000 ./scripts/finetune.sh juan_v7_20_stand \
+#     --randomization push_velocity=0.8 action_delay_steps=2,4 \
+#     --command stand_prob=0.35 swing_ratio=0.48 swing_height=0.035 backward_prob=0.25 backward_speed=0.25 \
+#               fast_prob=0.15 fast_speed=1.0 speed_limit=1.2 \
+#     --reward (as v7_15d) step_length_target=0.18 stand_settle_s=1.0 stand_feet=1.0 \
+#     --video stand --video-every 2000000
 set -euo pipefail
 cd "$(dirname "$0")/.."
 NAME=${1:?usage: scripts/finetune.sh <run name> [train.py options]}
@@ -61,5 +68,7 @@ echo "=== $(date +%H:%M) 3/3 compare on the measured servos -> $REPORT"
     echo
     echo "Falls (30 episodes at 0.4 m/s, with and without 0.3 m/s shoves):"
     python scripts/analysis/falls.py "$FROM" ${exported[@]+"${exported[@]}"}
+    echo
+    python scripts/analysis/stand_pushes.py "$FROM" ${exported[@]+"${exported[@]}"}
 } 2>&1 | tee "$REPORT"
 echo "=== $(date +%H:%M) done: robot/policies/ and $REPORT"
