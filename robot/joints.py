@@ -70,6 +70,9 @@ class Calibration:
     imu_bus: int = 1       # I2C bus number (1 = header pins 3/5; i2c-gpio overlays add others)
     imu_axes: tuple = ("x", "y", "z")  # sensor axis giving the torso's x (forward), y (left), z (up)
     imu_level: tuple = (0.0, 0.0)      # roll, pitch (deg) read when the torso stood level
+    # (lean right, lean forward) in deg added to the tilt the walking policy sees (not the dashboard or the
+    # fall check): a deliberate IMU mounting offset, e.g. to reproduce one a policy walked well with. 0 = off.
+    imu_offset: tuple = (0.0, 0.0)
 
     def __post_init__(self):
         joints = self.joints or {}
@@ -92,4 +95,5 @@ class Calibration:
             return cls()
         data["imu_axes"] = tuple(data.get("imu_axes", ("x", "y", "z")))
         data["imu_level"] = tuple(data.get("imu_level", (0.0, 0.0)))
+        data["imu_offset"] = tuple(data.get("imu_offset", (0.0, 0.0)))
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})

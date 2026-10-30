@@ -53,6 +53,16 @@ def tilt_deg(gravity):
     return math.degrees(math.atan2(-gy, -gz)), math.degrees(math.atan2(gx, -gz))
 
 
+def tilted(gravity, right_deg, forward_deg):
+    """The gravity vector as an IMU tilted by (right_deg, forward_deg) more would read it: tilt_deg of the
+    result is tilt_deg(gravity) plus the offsets."""
+    gx, gy, gz = gravity
+    p, r = math.radians(forward_deg), math.radians(right_deg)
+    gx, gz = gx * math.cos(p) - gz * math.sin(p), gz * math.cos(p) + gx * math.sin(p)
+    gy, gz = gy * math.cos(r) + gz * math.sin(r), gz * math.cos(r) - gy * math.sin(r)
+    return [gx, gy, gz]
+
+
 def _normalize(v):
     n = math.sqrt(sum(x * x for x in v)) or 1.0
     return [x / n for x in v]

@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-from robot.imu import tilt_deg
+from robot.imu import tilt_deg, tilted
 from robot.joints import BY_NAME, COUNTS_PER_DEG, NAMES
 from robot.policy import Controller, Policy
 
@@ -30,6 +30,12 @@ START_TILT_DEG = 20        # and the torso within this of upright
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLICY_DIR = os.path.join(HERE, "policies")
 LOG_DIR = os.path.join(HERE, "logs")
+# The Pi's health, logged every tick (the dashboard refreshes it once a second; NaN if unknown): CPU %
+# (all cores, and this program as % of one core), load, memory, CPU and GPU clocks, temperature, Wi-Fi
+# signal, power flags (1 = undervoltage / throttled right now), the slowest servo-bus pass of the last
+# few, and the IMU's failed reads so far.
+PI_FIELDS = ("cpu", "self_cpu", "load", "mem_used_mb", "arm_mhz", "gpu_mhz", "temp", "wifi_dbm", "undervolt",
+             "throttled", "bus_ms", "imu_failures")
 
 
 def policies():
@@ -96,7 +102,7 @@ class Walker:
         sensors, why = self._sensors()
         if sensors is None:
             return why
-        lean = math.hypot(*tilt_deg(sensors["gravity"]))
+        lean = math.hypot(*tilt_deg(sensors["gravity_raw"]))
         if lean > START_TILT_DEG:
             return f"not upright (tilted {lean:.0f} deg)"
         home = policy.meta["home"]
@@ -136,8 +142,25 @@ class Walker:
         imu = r.imu.state
         if imu is None or now - imu["t"] > STALE_S:
             return None, "no fresh IMU reading"
-        return {"q": np.array(q), "qd": np.array(qd), "gravity": np.array(imu["gravity"]), "gyro": np.array(imu["gyro"]),
-                "yaw": imu["yaw"], "t": now}, None
+        gravity = imu["gravity"]
+        if any(r.cal.imu_offset):
+            gravity = tilted(gravity, *r.cal.imu_offset)
+        return {"q": np.array(q), "qd": np.array(qd), "gravity": np.array(gravity), "gyro": np.array(imu["gyro"]),
+                "gravity_raw": np.array(imu["gravity"]), "yaw": imu["yaw"], "t": now}, None
+
+    def _slow(self, key):
+        """Each servo's latest supply voltage (V) or temperature (C), NaN until read: the bus thread reads
+        one servo's every few passes, so a value can be up to ~2 s old."""
+        return [np.nan if (v := self.robot.servo.get(BY_NAME[n][1], {}).get(key)) is None else v for n in NAMES]
+
+    def _pi(self):
+        r = self.robot
+        pi = dict(getattr(r, "pi", None) or {})
+        stats = getattr(r, "bus_stats", {})
+        passes = [p[0] for st in stats.values() for p in list(st)[-10:]]
+        pi["bus_ms"] = max(passes) if passes else None
+        pi["imu_failures"] = getattr(getattr(r, "imu", None), "failures", None)
+        return [np.nan if pi.get(k) is None else float(pi[k]) for k in PI_FIELDS]
 
     def _send(self, targets_rad):
         r, per_bus = self.robot, {}
@@ -152,7 +175,7 @@ class Walker:
     def _loop(self):
         dt = self.ctrl.dt
         log = {k: [] for k in ("t", "obs", "action", "target", "q", "qd", "gravity", "gyro", "yaw", "command", "tick_ms",
-                               "link_s")}
+                               "link_s", "vin", "temp", "pi", "gravity_raw")}
         link_max = 0.0
         stale, overruns, ticks = 0, 0, 0
         next_t = time.monotonic()
@@ -167,7 +190,7 @@ class Walker:
                     break
             else:
                 stale = 0
-                right, fwd = tilt_deg(sensors["gravity"])
+                right, fwd = tilt_deg(sensors["gravity_raw"])  # the real tilt, whatever the offset
                 if math.hypot(right, fwd) > TILT_RELAX_DEG:
                     self.stop(f"stopped: tilted {math.hypot(right, fwd):.0f} deg (falling): relaxed", relax=True)
                     break
@@ -184,7 +207,9 @@ class Walker:
                 for k, v in (("t", sensors["t"] - t0), ("obs", self.ctrl.last_obs), ("action", self.ctrl.last_action),
                              ("target", targets), ("q", sensors["q"]), ("qd", sensors["qd"]),
                              ("gravity", sensors["gravity"]), ("gyro", sensors["gyro"]), ("yaw", sensors["yaw"]),
-                             ("command", self.ctrl.command.copy()), ("link_s", quiet)):
+                             ("command", self.ctrl.command.copy()), ("link_s", quiet),
+                             ("vin", self._slow("vin")), ("temp", self._slow("temp")), ("pi", self._pi()),
+                             ("gravity_raw", sensors["gravity_raw"])):
                     log[k].append(np.array(v, dtype=float))
             took = (time.perf_counter() - start) * 1000
             log["tick_ms"].append(took)
@@ -210,6 +235,7 @@ class Walker:
         stamp = time.strftime("%Y-%m-%d_%H%M%S") + f"{time.time() % 1:.3f}"[1:]
         path = os.path.join(LOG_DIR, f"{stamp}_{self.policy_name}.npz")
         np.savez_compressed(path, joints=np.array(NAMES), status=self.status, move_ms=self.move_ms,
+                            pi_fields=np.array(PI_FIELDS), imu_offset=np.array(self.robot.cal.imu_offset),
                             **{k: np.array(v) for k, v in log.items()})
         self.stats["log"] = os.path.relpath(path, os.path.dirname(HERE))
 

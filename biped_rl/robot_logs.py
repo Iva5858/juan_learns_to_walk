@@ -56,7 +56,8 @@ class Replay:
     def pose(self, k):
         env, log = self.env, self.log
         m, d, robot = env.model, env.data, env.robot
-        R, self.roll, self.pitch = torso_rotation(log["gravity"][k], float(log["yaw"][k]) - self.yaw0)
+        gravity = log["gravity_raw"] if "gravity_raw" in log else log["gravity"]  # the real tilt, not the policy's offset view
+        R, self.roll, self.pitch = torso_rotation(gravity[k], float(log["yaw"][k]) - self.yaw0)
         quat = np.zeros(4)
         mujoco.mju_mat2Quat(quat, R.ravel())
         d.qpos[3:7] = quat

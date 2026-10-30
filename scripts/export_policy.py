@@ -29,6 +29,13 @@ from robot.policy import Controller, Policy
 SCRIPT = [(2, 0, 0, 0), (4, 0.3, 0, 0), (3, 0.2, 0, 0.4), (3, 0, 0.1, 0), (2, -0.1, 0, 0), (2, 0, 0, 0)]
 
 
+def top_speed(run, c):
+    """The fastest forward command it trained on: where the speed curriculum got to, not where it started."""
+    path = run / "curriculum.json"
+    reached = json.loads(path.read_text())["speed_max"] if path.exists() else 0.0
+    return round(max(c.speed_range[1], min(reached, c.speed_limit)), 2)
+
+
 def export(run, out):
     cfg = EnvConfig.from_dict(json.loads((run / "config.json").read_text()))
     cfg.randomization.enabled = False
@@ -57,7 +64,7 @@ def export(run, out):
             "action_filter": cfg.action_filter, "home": env.robot.home_joint, "joint_lo": env.robot.joint_lo,
             "joint_hi": env.robot.joint_hi, "gait_period": c.gait_period, "gait_period_fast": c.gait_period_fast,
             "fast_speed": c.fast_speed, "joints": np.array(NAMES), "run": run.name,
-            "forward_range": (-c.backward_speed, c.speed_range[1]), "lateral_range": c.lateral_range,
+            "forward_range": (-c.backward_speed, top_speed(run, c)), "lateral_range": c.lateral_range,
             "yaw_rate_range": c.yaw_rate_range}
     data.update({f"meta_{k}": np.asarray(v) for k, v in meta.items()})
     tmp = out.with_suffix(".tmp.npz")

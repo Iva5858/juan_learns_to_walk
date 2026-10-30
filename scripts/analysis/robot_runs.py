@@ -40,6 +40,18 @@ def weave_deg(yaw_deg, dt):
     return float(np.ptp(y - np.polyval(np.polyfit(x, y, 1), x)))
 
 
+def pi_summary(log):
+    """The Pi during the run (logs from 2026-10-30 on): mean and peak of each health field."""
+    if "pi" not in log:
+        return {}
+    out = {}
+    with np.errstate(all="ignore"):
+        for k, col in zip(log["pi_fields"], np.asarray(log["pi"], dtype=float).T):
+            if np.isfinite(col).any():
+                out[str(k)] = {"mean": float(np.nanmean(col)), "max": float(np.nanmax(col)), "min": float(np.nanmin(col))}
+    return out
+
+
 def analyse(path, env, min_seconds):
     log = dict(np.load(path))
     t, cmd = log["t"], log["command"]
@@ -74,9 +86,18 @@ def analyse(path, env, min_seconds):
         })
     tick = log.get("tick_ms", np.array([np.nan]))
     link = log.get("link_s", np.array([0.0]))
+    battery = [float("nan")] * 3  # V: start, end, lowest (median over the servos; logs from 2026-10-30 on)
+    if "vin" in log and np.isfinite(log["vin"]).any():
+        with np.errstate(all="ignore"):
+            v = np.nanmedian(log["vin"], axis=1)
+        n = max(1, int(3 / dt))
+        battery = [float(np.nanmedian(v[:n])), float(np.nanmedian(v[-n:])), float(np.nanmin(v))]
     return {"log": Path(path).name, "policy": Path(path).stem.split("_", 2)[2], "seconds": float(t[-1] - t[0]),
             "status": str(log.get("status", "")), "sole_bias_mm": 1000 * replay.sole_bias, "tick_ms_median": float(np.nanmedian(tick)),
-            "tick_ms_p99": float(np.nanpercentile(tick, 99)), "max_link_gap_s": float(np.max(link)), "segments": rows}
+            "tick_ms_p99": float(np.nanpercentile(tick, 99)), "max_link_gap_s": float(np.max(link)), "battery_v": battery,
+            "servo_temp_max": float(np.nanmax(log["temp"])) if "temp" in log and np.isfinite(log["temp"]).any() else float("nan"),
+            "pi": pi_summary(log),
+            "segments": rows}
 
 
 def main():
@@ -94,6 +115,17 @@ def main():
         runs.append(r)
         print(f"\n{r['log']}  ({r['policy']}, {r['seconds']:.0f} s, {r['status'] or 'no status'}; "
               f"control loop {r['tick_ms_median']:.1f} ms median, {r['tick_ms_p99']:.1f} ms 99%; longest link gap {r['max_link_gap_s']:.1f} s)")
+        if np.isfinite(r["battery_v"][0]):
+            print(f"  battery {r['battery_v'][0]:.2f} V at the start, {r['battery_v'][1]:.2f} V at the end, lowest "
+                  f"{r['battery_v'][2]:.2f} V; hottest servo {r['servo_temp_max']:.0f} C")
+        p = r["pi"]
+        if p:
+            g = lambda k, s="mean", p=p: p.get(k, {}).get(s, float("nan"))
+            flags = [w for w, k in (("UNDERVOLTAGE", "undervolt"), ("THROTTLED", "throttled")) if g(k, "max") > 0.5]
+            print(f"  Pi: CPU {g('cpu'):.0f}% (peak {g('cpu', 'max'):.0f}%), dashboard {g('self_cpu'):.0f}% of a core, "
+                  f"{g('temp', 'max'):.0f} C, clock {g('arm_mhz', 'min'):.0f}-{g('arm_mhz', 'max'):.0f} MHz, "
+                  f"Wi-Fi {g('wifi_dbm'):.0f} dBm, servo bus pass up to {g('bus_ms', 'max'):.0f} ms"
+                  + (f"; {' and '.join(flags)} during the run" if flags else ""))
         if not r["segments"]:
             continue
         print(f"  {'command (fwd, side, turn)':>27s} {'s':>5s} {'fwd m/s':>8s} {'(% cmd)':>8s} {'side':>6s} {'turn°/s':>8s}"
