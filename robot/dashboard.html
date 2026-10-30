@@ -164,6 +164,15 @@ kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:
           <button id="playful" onclick="api('/playful?on=' + (P && P.playful ? 0 : 1))">Playful mode: off</button>
           <span class="sub">Standing at Home with nothing else going on: a small idle move or chirp every 10&ndash;25 s.</span>
         </div>
+        <div class="nudge" style="margin-top:8px">
+          <button id="faces" onclick="api('/faces?on=' + (P && P.greet_faces ? 0 : 1))">Greet faces: off</button>
+          <button id="listen" onclick="api('/listen?on=' + (P && P.listening ? 0 : 1))">Voice commands: off</button>
+          <button id="spin" onclick="api('/spin')">Victory spin</button>
+          <span class="sub" id="extra"></span>
+        </div>
+        <div class="sub" style="margin-top:4px">Greet: a happy bounce when someone appears (standing idle). Voice: say
+          &ldquo;Juan&rdquo; first (&ldquo;Juan, walk&rdquo;, &ldquo;Juan, stop&rdquo;, &ldquo;Juan, dance&rdquo;); it steers the walking
+          policy once started. Spin: a full turn in place while walking, then a bounce.</div>
       </div>
       <div>
         <div class="label" style="margin-top:8px">Voice</div>
@@ -546,6 +555,14 @@ function personality() {
   $('playful').textContent = 'Playful mode: ' + (P.playful ? 'on' : 'off');
   $('playful').classList.toggle('on', P.playful);
   $('pstatus').textContent = P.gesture ? 'playing ' + P.gesture : '';
+  $('faces').textContent = 'Greet faces: ' + (P.greet_faces ? 'on' : 'off');
+  $('faces').classList.toggle('on', P.greet_faces);
+  $('listen').textContent = 'Voice commands: ' + (P.listening ? 'on' : 'off');
+  $('listen').classList.toggle('on', P.listening);
+  $('spin').disabled = P.spinning;
+  const extra = [P.faces_error && 'camera/faces: ' + P.faces_error, P.listener_error && 'voice: ' + P.listener_error,
+                 P.faces && P.faces.faces ? 'sees ' + P.faces.faces + ' face(s)' : '', P.spinning ? 'spinning' : ''].filter(Boolean);
+  $('extra').innerHTML = extra.map(e => e.includes(':') ? `<span class="warn">${e}</span>` : e).join(' · ');
   $('vstatus').innerHTML = !V.backend ? '<span class="bad">no audio output found</span>'
     : V.error ? `<span class="warn">${V.error}</span>` : V.playing ? 'playing ' + V.playing : `${V.backend}` + (V.tts ? ' + ' + V.tts : '');
 }

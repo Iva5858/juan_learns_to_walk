@@ -64,7 +64,30 @@ def feet_air_time(env, s, w):
     return w.feet_air_time * float(used.sum())
 
 
-TASK_TERMS = (tracking_vel, tracking_lat_yaw, heading, gait_contact, feet_clearance, step_length, feet_air_time)
+def swing_lift(env, s, w):
+    """Each foot the clock says should swing: its sole height, linear from 0 to swing_height (unlike
+    feet_clearance's narrow bell, a foot 3 mm up already earns more than one on the floor)."""
+    if w.swing_lift == 0 or not s.swing.any():
+        return 0.0
+    h = env.cfg.command.swing_height
+    return w.swing_lift * float(np.mean(s.swing * np.clip(env.episode.clearance / h, 0.0, 1.0)))
+
+
+def swing_reach(env, s, w):
+    """Each lifted swing foot: its speed in the commanded direction, relative to the commanded speed
+    (capped at 2x: a swinging foot moves about twice as fast as the body)."""
+    forward = env.command.forward
+    if w.swing_reach == 0 or abs(forward) < 0.05 or not s.swing.any():
+        return 0.0
+    heading = env.command.heading_target
+    along = s.sole_vel[:, 0] * np.cos(heading) + s.sole_vel[:, 1] * np.sin(heading)
+    lifted = env.episode.clearance > w.lift_height
+    reach = np.clip(np.sign(forward) * along / abs(forward), 0.0, 2.0)
+    return w.swing_reach * float(np.mean(s.swing * lifted * reach))
+
+
+TASK_TERMS = (tracking_vel, tracking_lat_yaw, heading, gait_contact, feet_clearance, step_length, feet_air_time,
+              swing_lift, swing_reach)
 
 
 # --------------------------------------------------------------------- penalties
@@ -208,6 +231,13 @@ def footstep(env, s, w):
     return w.footstep * min(s.touchdowns, max(recent - allowed, 0.0))
 
 
+def double_support(env, s, w):
+    """Both feet carrying weight while the gait clock says one of them should be in the air."""
+    if w.double_support == 0 or env.command.standing:
+        return 0.0
+    return w.double_support * float(env.episode.contact.sum() == 2 and s.swing.any())
+
+
 def reversals(env, s, w):
     """Servo direction reversals (gear backlash hammering, potentiometer wear)."""
     return w.reversals * s.reversals
@@ -234,11 +264,13 @@ def stand_still(env, s, w):
 PENALTY_TERMS = (path_offset, orientation, ang_vel_xy, lin_vel_z, base_height, knee_hyperextension,
                  hip_roll, hip_roll_inward, action_rate, action_acc, joint_acc, servo_load,
                  servo_saturation, servo_overload, backdrive, impact, foot_slip, joint_limits,
-                 feet_distance, energy, symmetry, gait_mismatch, footstep, reversals, stand_still, stand_pose)
+                 feet_distance, energy, symmetry, gait_mismatch, footstep, reversals, stand_still, stand_pose,
+                 double_support)
 
-# Free while recovering (1 s after a shove, or the torso tilted > 8 deg): otherwise they punish
-# the quick extra step that catches a fall.
-PAUSED_WHILE_RECOVERING = ("symmetry", "gait_mismatch", "footstep", "reversals", "stand_pose")
+# Free while recovering (1 s after a shove, or the torso tilted beyond recover_tilt_deg): otherwise they
+# punish the quick extra step that catches a fall. A threshold the robot can lean past all the time is a
+# loophole: juan_v7_15c leaned 9.4 deg (66% of steps past 8) to switch them off.
+PAUSED_WHILE_RECOVERING = ("symmetry", "gait_mismatch", "footstep", "reversals", "stand_pose", "double_support")
 
 
 def compute(env, s):
@@ -258,7 +290,7 @@ def compute(env, s):
     task = {f.__name__: f(env, s, w) for f in TASK_TERMS}
     task = {k: s.tracking * v for k, v in task.items()}
     pen = {f.__name__: f(env, s, w) for f in PENALTY_TERMS}
-    s.recovering = (env.episode.t - env.episode.last_push < 1.0) or np.linalg.norm(s.grav[:2]) > np.sin(np.radians(8))
+    s.recovering = (env.episode.t - env.episode.last_push < 1.0) or np.linalg.norm(s.grav[:2]) > np.sin(np.radians(w.recover_tilt_deg))
     if s.recovering:
         for k in PAUSED_WHILE_RECOVERING:
             pen[k] = 0.0

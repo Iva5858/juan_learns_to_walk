@@ -7,6 +7,10 @@
     idle animation (settle, fidget, weight shift), sometimes with a chirp.
   * Reactions: a "whoa" when the robot is bumped (gyro spike), a sleepy whine when the battery is
     low, and sounds when the walking policy starts, stops or the robot falls.
+  * Greeting faces (robot/faces.py): a happy bounce and chirp when someone appears, if standing idle.
+  * Voice commands (robot/voice_commands.py, needs a microphone): steer the running walking policy,
+    play gestures, answer in chord speech. Voice never starts the walking policy.
+  * Victory spin: turn in place a full circle with the walking policy, stop, then a happy bounce.
 """
 import math
 import random
@@ -24,6 +28,8 @@ FALL_TILT_DEG = 40          # past this during a gesture: stop and relax (fallin
 BUMP_RAD_S = 2.0            # gyro roll/pitch rate that counts as a bump
 LOW_BATTERY_V = 10.5
 WALKER_SOUNDS = {"start": "excited", "stop": "ok", "fall": "scared", "lost": "sad"}
+SPIN_RATE = 0.6             # rad/s turn command for the victory spin (~11 s per circle in sim)
+SPIN_TIMEOUT_S = 25.0
 
 
 class Personality:
@@ -35,6 +41,9 @@ class Personality:
         self.last_activity = time.monotonic()
         self._next_idle = random.uniform(*IDLE_EVERY_S)
         self._last_bump = self._last_battery = 0.0
+        self.faces = self.listener = None
+        self.faces_error = self.listener_error = None
+        self.spinning = False
         threading.Thread(target=self._watch, daemon=True).start()
 
     # ---- gestures ----
@@ -162,6 +171,103 @@ class Personality:
                     self.voice.say("chirp")
                 self._next_idle = random.uniform(*IDLE_EVERY_S)
 
+    # ---- faces, voice commands, victory spin ----
+    def set_faces(self, on):
+        """Greet people the camera sees (robot/faces.py)."""
+        if not on:
+            if self.faces:
+                self.faces.stop()
+            self.faces = None
+            return None
+        if self.faces:
+            return None
+        try:
+            from robot.faces import FaceWatcher, jpeg_frames
+            self.faces = FaceWatcher(lambda: jpeg_frames(self.robot.camera.stream()), self._greet)
+            self.faces_error = None
+        except Exception as e:  # no OpenCV, no model, no camera
+            self.faces_error = str(e)[:200]
+        return self.faces_error
+
+    def _greet(self, face):
+        self.last_activity = time.monotonic()
+        if self._idle():
+            self.play("happy_bounce")  # (its own happy chirp)
+        else:
+            self.voice.say("happy")
+
+    def set_listening(self, on):
+        """Voice commands through a microphone (robot/voice_commands.py)."""
+        if not on:
+            if self.listener:
+                self.listener.close()
+            self.listener = None
+            return None
+        if self.listener:
+            return None
+        try:
+            from robot.voice_commands import VoiceCommands
+            self.listener = VoiceCommands(self._voice_command, wake=True)
+            self.listener_error = None
+        except Exception as e:  # no microphone, no vosk, no model
+            self.listener_error = str(e)[:200]
+        return self.listener_error
+
+    def _voice_command(self, action, text):
+        w, kind = self.robot.walker, action[0]
+        self.last_activity = time.monotonic()
+        if kind == "speak":
+            self.voice.speak_chords(action[1], translate=True)
+        elif kind == "gesture":
+            if self.play(action[1]):  # an error: walking, already playing...
+                self.voice.say("curious")
+        elif kind == "spin":
+            if self.victory_spin():
+                self.voice.say("curious")
+        elif not w.running:
+            self.voice.say("curious")  # walking commands only steer a running policy
+        else:
+            vx, vy, wz = w.ctrl.command
+            vx, wz = {"walk": (action[-1], 0.0), "turn": (vx, action[-1]), "faster": (vx + 0.05, wz),
+                      "slower": (vx - 0.05, wz), "stop": (0.0, 0.0)}[kind]
+            w.set_command(vx, 0.0 if kind in ("walk", "stop") else vy, wz)
+            self.voice.say("ok")
+
+    def victory_spin(self):
+        """Turn in place a full circle (IMU heading), stop the walking policy, then a happy bounce."""
+        w = self.robot.walker
+        if not w.running:
+            return "start the walking policy first"
+        if self.spinning:
+            return "already spinning"
+        self.spinning = True
+        threading.Thread(target=self._spin, daemon=True).start()
+        return None
+
+    def _spin(self):
+        r, w = self.robot, self.robot.walker
+        try:
+            last, turned, t0 = r.imu.state["yaw"], 0.0, time.monotonic()
+            while w.running and abs(turned) < 2 * math.pi and time.monotonic() - t0 < SPIN_TIMEOUT_S:
+                w.set_command(0.0, 0.0, SPIN_RATE)
+                time.sleep(0.05)
+                yaw = r.imu.state["yaw"]
+                turned += (yaw - last + math.pi) % (2 * math.pi) - math.pi
+                last = yaw
+            if not w.running:
+                return
+            w.set_command(0.0, 0.0, 0.0)
+            time.sleep(1.5)  # settle into standing
+            w.stop("stopped: victory spin")
+            time.sleep(0.5)
+            self.play("happy_bounce")
+        finally:
+            self.spinning = False
+
     def state(self):
         return {"gesture": self.gesture, "playful": self.playful, "voice": self.voice.state(),
+                "greet_faces": self.faces is not None, "faces": self.faces.state() if self.faces else None,
+                "faces_error": self.faces_error, "listening": self.listener is not None,
+                "listener_error": self.listener_error or (self.listener.error if self.listener else None),
+                "spinning": self.spinning,
                 "gestures": [{"name": k, "label": v[0], "description": v[1]} for k, v in G.GESTURES.items()]}

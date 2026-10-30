@@ -30,8 +30,9 @@ def sample(env):
     c, rng, cmd = env.cfg.command, env.np_random, env.command
     cmd.standing = bool(rng.uniform() < c.stand_prob)
     # One draw picks the kind of command (no draw when all shares are off: the walk stage).
-    shares = np.cumsum([c.turn_in_place_prob, c.backward_prob, c.sideways_prob])
-    kind = int(np.searchsorted(shares, rng.uniform(), side="right")) if shares[-1] > 0 and not cmd.standing else 3
+    shares = np.cumsum([c.turn_in_place_prob, c.backward_prob, c.sideways_prob]
+                       + ([c.fast_prob] if c.fast_prob > 0 else []))
+    kind = int(np.searchsorted(shares, rng.uniform(), side="right")) if shares[-1] > 0 and not cmd.standing else 4
     if cmd.standing:
         cmd.vec = np.zeros(3)
     elif kind == 0:
@@ -40,6 +41,9 @@ def sample(env):
         cmd.vec = np.array([-rng.uniform(0.0, c.backward_speed), 0.0, 0.0])
     elif kind == 2:
         cmd.vec = np.array([0.0, rng.uniform(*c.lateral_range), 0.0])
+    elif kind == 3 and c.fast_prob > 0:
+        top = env.curriculum.speed_max
+        cmd.vec = np.array([rng.uniform(0.75 * top, top), 0.0, 0.0])
     else:
         vx = rng.uniform(-c.backward_speed, env.curriculum.speed_max)
         if rng.uniform() < c.straight_prob:

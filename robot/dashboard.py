@@ -430,6 +430,12 @@ class Handler(BaseHTTPRequestHandler):
             elif p == "/volume":
                 robot.personality.voice.volume = max(0.0, min(1.0, float(q["v"])))
                 self.result()
+            elif p == "/faces":
+                self.result(robot.personality.set_faces(q.get("on") == "1"))
+            elif p == "/listen":
+                self.result(robot.personality.set_listening(q.get("on") == "1"))
+            elif p == "/spin":
+                self.result(robot.personality.victory_spin())
             elif p == "/playful":
                 robot.personality.playful = q.get("on") == "1"
                 robot.personality.last_activity = time.monotonic()

@@ -61,3 +61,44 @@ def test_terms_stay_bounded_in_the_simulator():
         if term or trunc:
             env.reset(options={"command": (0.3, 0.0, 0.0)})
     assert seen > 0  # touchdowns happened and were scored
+
+
+def swing_state(clearance, contact, swing, sole_vel=((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))):
+    ep = SimpleNamespace(clearance=np.array(clearance), contact=np.array(contact, dtype=float))
+    s = SimpleNamespace(swing=np.array(swing), sole_vel=np.array(sole_vel))
+    return ep, s
+
+
+def test_swing_lift_pays_for_every_millimetre():
+    w = RewardWeights(swing_lift=1.0)
+    env = fake_env(0.3)
+    h = env.cfg.command.swing_height
+    values = []
+    for lift in (0.0, 0.003, h / 2, h, 2 * h):
+        env.episode, s = swing_state((lift, 0.0), (0, 1), (True, False))
+        values.append(rewards.swing_lift(env, s, w))
+    assert values[0] == 0.0 < values[1] < values[2] < values[3] == values[4]  # rising, capped at swing_height
+
+
+def test_swing_reach_needs_a_lifted_foot_moving_the_commanded_way():
+    w = RewardWeights(swing_reach=1.0)
+    env = fake_env(0.3)
+    env.command.heading_target = 0.0
+    env.episode, s = swing_state((0.02, 0.0), (0, 1), (True, False), ((0.6, 0, 0), (0, 0, 0)))
+    assert np.isclose(rewards.swing_reach(env, s, w), 1.0)          # 2x the command (cap), one of two feet
+    env.episode, s = swing_state((0.0, 0.0), (0, 1), (True, False), ((0.6, 0, 0), (0, 0, 0)))
+    assert rewards.swing_reach(env, s, w) == 0.0                     # sliding, not lifted
+    env.episode, s = swing_state((0.02, 0.0), (0, 1), (True, False), ((-0.6, 0, 0), (0, 0, 0)))
+    assert rewards.swing_reach(env, s, w) == 0.0                     # moving the wrong way
+
+
+def test_double_support_only_when_a_foot_should_swing():
+    w = RewardWeights(double_support=1.0)
+    env = fake_env(0.3)
+    env.episode, s = swing_state((0, 0), (1, 1), (True, False))
+    assert rewards.double_support(env, s, w) == 1.0
+    env.episode, s = swing_state((0, 0), (1, 1), (False, False))
+    assert rewards.double_support(env, s, w) == 0.0                  # the clock's double-support phase
+    env = fake_env(0.0, standing=True)
+    env.episode, s = swing_state((0, 0), (1, 1), (True, False))
+    assert rewards.double_support(env, s, w) == 0.0                  # told to stand

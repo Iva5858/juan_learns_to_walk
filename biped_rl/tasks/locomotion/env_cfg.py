@@ -42,6 +42,8 @@ class CommandConfig:
     turn_in_place_prob: float = 0.2         # only turn
     backward_prob: float = 0.1              # only walk backward, at [0, backward_speed]
     sideways_prob: float = 0.1              # only walk sideways, within lateral_range
+    fast_prob: float = 0.0                  # only walk forward fast: the top quarter of the speed range
+                                            # (otherwise fast commands are rare); 0 = off
     straight_prob: float = 0.3              # of the remaining commands: no sideways or turn part
     resample_interval: tuple = (2.0, 8.0)   # s between new commands within an episode
     # Forward speed: the top of the range grows (speed curriculum) while the robot tracks its top
@@ -86,6 +88,10 @@ class RewardWeights:
     step_length_target: float = 0.12        # ...up to this far [m] (speed = step length x cadence)
     feet_air_time: float = 0.0              # foot stays up for the swing the gait clock plans (no early taps)
     lift_height: float = 0.01               # m: a foot counts as stepping only above this (not skimming the floor)
+    # Dense versions (0 = off; juan_v7_15c on): they pay for every bit of progress, so training can
+    # find its way out of a shuffle (the touchdown terms above pay nothing until a full step happens).
+    swing_lift: float = 0.0                 # swing foot's height, linear up to swing_height
+    swing_reach: float = 0.0                # swing foot moving in the commanded direction while lifted
     # --- survival ---
     alive: float = 0.2                      # small: survival alone must not be worth standing still for
     termination: float = -10.0              # once, on a fall or a hardware limit
@@ -127,6 +133,8 @@ class RewardWeights:
     gait_mismatch: float = 0.5              # share of feet on/off the ground against the gait clock
     footstep: float = 1.0                   # steps beyond the gait clock's: fewer steps, fewer impacts
     reversals: float = 0.1                  # per servo direction reversal (backlash hammering, pot wear)
+    double_support: float = 0.0             # both feet loaded while the clock says one should swing (0 = off)
+    recover_tilt_deg: float = 8.0           # torso tilt counted as recovering (gait penalties paused); juan_v7_15d: 20
     # --- hardware limits: crossing one ends the episode like a fall (the robot "broke") ---
     break_impact: float = 3.0               # landing above this x body weight
     break_joint_speed: float = 1.3          # joint forced above this x no-load speed...

@@ -4,10 +4,15 @@ different every time), your own .wav files in robot/sounds/, and optional text-t
 Plays through whatever audio output there is: `aplay` (ALSA, Raspberry Pi OS; pick a device with
 the JUAN_AUDIO_DEVICE environment variable, e.g. "plughw:1,0" for a USB speaker) or `afplay` (Mac,
 for previewing). Without an audio device it quietly does nothing. Sounds queue, one at a time.
+Text-to-speech: espeak-ng on the Pi; on a Mac, macOS's own `say` with a robot voice (Zarvox; another
+with JUAN_MAC_VOICE, e.g. "Trinoids", "Ralph" or "Samantha").
 
     python3 -m robot.sound happy          # play one
     python3 -m robot.sound --all          # every emotion, one after the other
     python3 -m robot.sound --save out/    # write them as .wav files
+    python3 -m robot.sound --say "Hello, I am Juan"
+    python3 -m robot.sound --chords "Hello, I am Juan!"          # chord speech
+    python3 -m robot.sound --chords --translate "Are you a friend?"   # then the words, translated
 """
 import io
 import os
@@ -103,6 +108,54 @@ def make(emotion, seed=None):
     return 0.8 * x / max(1e-6, np.max(np.abs(x)))
 
 
+# ---------------------------------------------------------------- chord speech
+PENTATONIC = (0, 2, 4, 7, 9)  # scale steps (semitones): any mix of them sounds musical
+
+
+def _syllables(word):
+    """Rough syllables: each run of vowels with the consonants before it."""
+    parts, cur = [], ""
+    for ch in word.lower():
+        cur += ch
+        if ch in "aeiouy" and (len(cur) == 1 or cur[-2] not in "aeiouy"):
+            parts.append(cur)
+            cur = ""
+    if cur:
+        parts[-1:] = [parts[-1] + cur] if parts else [cur]
+    return parts or [word]
+
+
+def chord(root, kind, seconds, rise=1.0, bright=0.35):
+    """Three notes together (root, a third, a fifth), with a gentle glide by `rise`."""
+    third = 2 ** ((4 if kind else 3) / 12)
+    return sum(syllable(root * f, root * f * rise, seconds, vibrato=0.006, vib_hz=7, bright=bright)
+               for f in (1.0, third, 1.5)) / 3
+
+
+def make_chords(text, base=330.0):
+    """Speech as music: every syllable a short chord whose pitch and colour come from its letters,
+    so the same word always sounds the same. Questions rise at the end; '!' is higher and brighter."""
+    import re
+    import zlib
+    words = re.findall(r"[a-zA-Z']+", text) or ["hello"]
+    question, excited = text.strip().endswith("?"), text.strip().endswith("!")
+    parts = []
+    for wi, word in enumerate(words):
+        syls = _syllables(word)
+        for si, syl in enumerate(syls):
+            h = zlib.crc32(syl.encode())
+            step = PENTATONIC[h % 5] + 12 * ((h >> 3) % 2)
+            root = base * 2 ** (step / 12) * (1.25 if excited else 1.0)
+            seconds = 0.11 + 0.025 * min(len(syl), 4)
+            last = wi == len(words) - 1 and si == len(syls) - 1
+            rise = 1.35 if (last and question) else 0.92 if last else 1.0
+            parts += [chord(root, (h >> 5) % 3 != 0, seconds + (0.08 if last else 0), rise,
+                            bright=0.5 if excited else 0.35), silence(0.025)]
+        parts.append(silence(0.07))
+    x = np.concatenate(parts)
+    return 0.8 * x / max(1e-6, np.max(np.abs(x)))
+
+
 EMOTIONS = ("happy", "excited", "sad", "curious", "hello", "sleepy", "scared", "alert", "ok", "startup",
             "goodbye", "chirp")
 
@@ -126,7 +179,7 @@ class Voice:
         self.volume = volume
         self.device = os.environ.get("JUAN_AUDIO_DEVICE")
         self.backend = "aplay" if shutil.which("aplay") else "afplay" if shutil.which("afplay") else None
-        self.tts = "espeak-ng" if shutil.which("espeak-ng") else "espeak" if shutil.which("espeak") else None
+        self.tts = next((t for t in ("espeak-ng", "espeak", "say") if shutil.which(t)), None)
         self.error = None if self.backend else "no audio player (aplay / afplay) found"
         self.playing = None
         self._q = queue.Queue(maxsize=4)
@@ -141,6 +194,12 @@ class Voice:
 
     def speak(self, text):
         self._put(("tts", text[:200]))
+
+    def speak_chords(self, text, translate=False):
+        """Say `text` in chord speech; with translate, a robot voice speaks the words afterwards."""
+        self._put(("chords", text[:200]))
+        if translate:
+            self.speak(text)
 
     def files(self):
         return sorted(f for f in os.listdir(SOUND_DIR) if f.endswith(".wav")) if os.path.isdir(SOUND_DIR) else []
@@ -176,25 +235,46 @@ class Voice:
                 elif kind == "file":
                     with open(what, "rb") as f:
                         self._play_wav_bytes(f.read())
+                elif kind == "chords":
+                    vol = self.volume if self.backend == "aplay" else 1.0
+                    self._play_wav_bytes(to_wav(make_chords(what), vol))
                 elif kind == "tts":
                     if self.tts is None:
                         raise OSError("no text-to-speech: sudo apt install espeak-ng")
-                    wav = subprocess.run([self.tts, "-s", "150", "-p", "70", "--stdout", what],
-                                         capture_output=True, timeout=10, check=True).stdout
-                    self._play_wav_bytes(wav)
+                    self._play_wav_bytes(self._speech_wav(what))
                 self.error = None
             except Exception as e:  # no device, device busy, bad file...
                 self.error = str(e)[:200]
             self.playing = None
+
+    def _speech_wav(self, text):
+        if self.tts == "say":  # macOS: write the speech as a 16-bit wav, then play it like everything else
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                path = f.name
+            try:
+                subprocess.run(["say", "-v", os.environ.get("JUAN_MAC_VOICE", "Zarvox"), "-r", "170",
+                                f"--data-format=LEI16@{RATE}", "-o", path, text], timeout=15, check=True)
+                with open(path, "rb") as f:
+                    return f.read()
+            finally:
+                os.unlink(path)
+        return subprocess.run([self.tts, "-s", "150", "-p", "70", "--stdout", text],
+                              capture_output=True, timeout=10, check=True).stdout
 
     def state(self):
         return {"backend": self.backend, "tts": self.tts, "volume": self.volume, "error": self.error,
                 "playing": self.playing, "files": self.files(), "emotions": EMOTIONS}
 
 
+def _wait(v):
+    import time
+    time.sleep(0.3)
+    while v.playing or not v._q.empty():
+        time.sleep(0.05)
+
+
 if __name__ == "__main__":
     import sys
-    import time
     args = sys.argv[1:]
     if args[:1] == ["--save"]:
         out = args[1] if len(args) > 1 else "."
@@ -203,13 +283,23 @@ if __name__ == "__main__":
             with open(os.path.join(out, f"{e}.wav"), "wb") as f:
                 f.write(to_wav(make(e, seed=1)))
         print(f"wrote {len(EMOTIONS)} files to {out}")
+        sys.exit()
+    v = Voice()
+    if args[:1] == ["--chords"]:
+        translate = "--translate" in args
+        text = " ".join(a for a in args[1:] if a != "--translate") or "Hello, I am Juan!"
+        v.speak_chords(text, translate)
+        _wait(v)
+        if translate:
+            _wait(v)
+    elif args[:1] == ["--say"]:
+        print("speaking with", v.tts)
+        v.speak(" ".join(args[1:]) or "Hello, I am Juan")
+        _wait(v)
     else:
-        v = Voice()
-        for e in (EMOTIONS if args[:1] == ["--all"] else args or ["happy"]):
+        for e in EMOTIONS if args[:1] == ["--all"] else args or ["happy"]:
             print(e)
             v.say(e)
-            time.sleep(0.3)
-            while v.playing or not v._q.empty():
-                time.sleep(0.05)
-        if v.error:
-            print("audio error:", v.error)
+            _wait(v)
+    if v.error:
+        print("audio error:", v.error)

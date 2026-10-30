@@ -23,3 +23,6 @@ research_notes/
 
 # macOS
 .DS_Store
+
+# Speech recognition models (downloaded, see robot/voice_commands.py)
+robot/models/

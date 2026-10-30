@@ -17,26 +17,11 @@ import math
 from pathlib import Path
 
 import imageio
-import mujoco
 import numpy as np
 from PIL import Image, ImageDraw
 
+from biped_rl.robot_logs import Replay, kinematic_env
 from biped_rl.robots import PROJECT
-from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
-
-SWITCH_MM = 3.0   # the other foot becomes the standing foot once it is this much lower
-
-
-def torso_rotation(gravity, yaw):
-    """Rotation matrix (world <- torso) from the IMU's down vector (torso frame) and heading."""
-    g = np.asarray(gravity, float) / np.linalg.norm(gravity)
-    roll = math.atan2(-g[1], -g[2])                    # + = right side down
-    pitch = math.atan2(g[0], math.hypot(g[1], g[2]))   # + = nose down
-    cr, sr, cp, sp, cy, sy = math.cos(roll), math.sin(roll), math.cos(pitch), math.sin(pitch), math.cos(yaw), math.sin(yaw)
-    Rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]])
-    Ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]])
-    Rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
-    return Rz @ Ry @ Rx, math.degrees(roll), math.degrees(pitch)
 
 
 def main():
@@ -50,13 +35,9 @@ def main():
     a = p.parse_args()
     log = dict(np.load(a.log))
     W, H = map(int, a.size.split("x"))
-    cfg = EnvConfig()
-    cfg.randomization.enabled = False
-    env = BipedEnv(cfg.to_dict(), render_mode="rgb_array", width=W, height=H)
-    env.reset(seed=0)
+    env = kinematic_env(render_mode="rgb_array", width=W, height=H)
     env._draw_track_markers = lambda scene: None  # (the simulator's commanded-path and push markers)
     env._draw_push_arrow = lambda scene: None
-    m, d, robot = env.model, env.data, env.robot
 
     dt = float(np.median(np.diff(log["t"]))) if len(log["t"]) > 1 else 0.02
     k0 = int(a.start / dt)
@@ -66,30 +47,11 @@ def main():
     status = str(log.get("status", ""))
     link = log.get("link_s")
 
-    base_xy = np.zeros(2)
-    stance, anchor = None, None
+    replay = Replay(log, env, yaw0=yaw0)
     frames = []
     for k in range(k0, k1):
-        R, roll, pitch = torso_rotation(log["gravity"][k], float(log["yaw"][k]) - yaw0)
-        quat = np.zeros(4)
-        mujoco.mju_mat2Quat(quat, R.ravel())
-        d.qpos[3:7] = quat
-        d.qpos[robot.qpos_idx] = log["q"][k]
-        d.qpos[0:2] = base_xy
-        d.qpos[2] = 0.3
-        d.qvel[:] = 0.0
-        mujoco.mj_forward(m, d)
-        soles = env.soles()[0]
-        lower = int(np.argmin(soles[:, 2]))
-        if stance is None:
-            stance, anchor = lower, soles[lower, :2].copy()
-        elif lower != stance and soles[stance, 2] - soles[lower, 2] > SWITCH_MM / 1000:
-            stance, anchor = lower, soles[lower, :2].copy()  # touchdown of the other foot
-        else:
-            base_xy = base_xy + anchor - soles[stance, :2]   # the standing foot stays planted
-        d.qpos[0:2] = base_xy
-        d.qpos[2] -= soles[:, 2].min()                       # lowest sole on the floor
-        mujoco.mj_forward(m, d)
+        replay.pose(k)
+        roll, pitch, base_xy = replay.roll, replay.pitch, replay.base_xy
         if (k - k0) % every:
             continue
         if getattr(env, "_camera", None) is None:

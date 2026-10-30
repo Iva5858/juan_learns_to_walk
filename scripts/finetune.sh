@@ -18,6 +18,15 @@
 #     --reward tracking_vel=5.0 step_length=4.0 feet_air_time=2.0 lin_vel_z=0.2 footstep=0.5 gait_mismatch=0.3
 # juan_v7_15b: the same, with real steps required (feet lifted >= 1 cm), more foot lift and less sliding:
 #   ... (as v7_15) ... feet_clearance=2.0 foot_slip=4.0
+# juan_v7_15c: dense stepping rewards (lift and reach pay for every bit of progress), a penalty for keeping
+# both feet down when one should swing, and the original rhythm (more speed has to come from longer steps):
+#   FROM=runs/juan_v7_13_scale08 STEPS=5000000 ./scripts/finetune.sh juan_v7_15c_test \
+#     --randomization push_velocity=0 action_delay_steps=2,4 \
+#     --command swing_ratio=0.48 swing_height=0.035 \
+#     --reward tracking_vel=5.0 step_length=4.0 feet_air_time=2.0 swing_lift=2.0 swing_reach=1.0 double_support=1.0 \
+#              lin_vel_z=0.2 footstep=0.5 gait_mismatch=0.3 foot_slip=4.0
+# juan_v7_15d: the same, with gait penalties paused only after a shove or a real stumble (tilt over 20 deg),
+# not a constant lean: add recover_tilt_deg=20
 set -euo pipefail
 cd "$(dirname "$0")/.."
 NAME=${1:?usage: scripts/finetune.sh <run name> [train.py options]}

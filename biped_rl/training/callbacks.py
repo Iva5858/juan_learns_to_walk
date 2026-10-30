@@ -30,7 +30,7 @@ class TrainingDashboard(BaseCallback):
         "servo_protection": ("servo_load", "servo_saturation", "servo_overload", "backdrive", "energy",
                              "joint_limits"),
         "feet_and_impacts": ("impact", "foot_slip", "feet_distance", "footstep"),
-        "gait_shape": ("symmetry", "gait_mismatch"),
+        "gait_shape": ("symmetry", "gait_mismatch", "double_support"),
     }
 
     SAMPLE_EVERY = 4
@@ -115,27 +115,29 @@ def end_of_clip(frames, fps):
 
 
 class VideoRecorder(BaseCallback):
-    """Every `freq` steps, film the current policy (nominal physics, at the speed curriculum's top).
+    """Every `freq` steps, film the current policy on the nominal robot (with the shortest servo delay
+    it trains with: policies trained only with delay fall without any): walking forward at the speed
+    curriculum's top, and, if it trains on backward commands, walking backward at its top backward speed.
 
-    The clip goes to TensorBoard (IMAGES tab, as an animation) and to <run>/videos/.
+    The forward clip goes to TensorBoard (IMAGES tab, as an animation); both go to <run>/videos/.
     """
 
     def __init__(self, cfg, video_dir, freq, seconds=8.0, size=(240, 320)):
         super().__init__()
         cfg = EnvConfig.from_dict(cfg.to_dict())
         cfg.randomization.enabled = False
+        self.delay = int(cfg.randomization.action_delay_steps[0])
+        self.backward = cfg.command.backward_speed if cfg.command.backward_prob > 0 else 0.0
         self.env = BipedEnv(cfg, render_mode="rgb_array", height=size[0], width=size[1])
         self.video_dir, self.freq, self.steps = Path(video_dir), freq, int(seconds / self.env.dt)
         self._last = 0
 
-    def _on_step(self):
-        if self.num_timesteps - self._last < self.freq:
-            return True
-        self._last = self.num_timesteps
+    def _clip(self, forward):
+        """Film one clip at a fixed forward command. Returns (frames, distance walked along +x, seconds)."""
         norm = self.model.get_vec_normalize_env()
-        speed = max(st["speed_max"] for st in self.training_env.env_method("curriculum_state"))
-        obs, _ = self.env.reset(seed=0, options={"speed": speed})
-        start_x = self.env.data.qpos[0]  # nominal physics: target direction is +x
+        obs, _ = self.env.reset(seed=0, options={"command": (forward, 0.0, 0.0)})
+        self.env.servo.action_delay = self.delay
+        start_x = self.env.data.qpos[0]  # nominal physics: the target direction is +x
         frames = [self.env.render()]
         for i in range(self.steps):
             action, _ = self.model.predict(norm.normalize_obs(obs), deterministic=True)
@@ -144,16 +146,29 @@ class VideoRecorder(BaseCallback):
                 frames.append(self.env.render())
             if terminated or truncated:
                 break
+        return frames, self.env.data.qpos[0] - start_x, (i + 1) * self.env.dt
+
+    def _on_step(self):
+        if self.num_timesteps - self._last < self.freq:
+            return True
+        self._last = self.num_timesteps
         fps = round(1 / self.env.dt) // 2
-        distance = self.env.data.qpos[0] - start_x
+        self.video_dir.mkdir(parents=True, exist_ok=True)
+        speed = max(st["speed_max"] for st in self.training_env.env_method("curriculum_state"))
+        frames, distance, seconds = self._clip(speed)
         frames = end_of_clip(frames, fps)
         self.logger.record("video/distance_m", distance)
-        self.logger.record("video/mean_speed", distance / ((i + 1) * self.env.dt))
-        self.video_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.record("video/mean_speed", distance / seconds)
         imageio.mimsave(self.video_dir / f"step_{self.num_timesteps // 1000:06d}k_cmd{speed:.2f}_walked{distance:.2f}m.mp4", frames, fps=fps)
         video = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2).unsqueeze(0)  # (1,T,C,H,W)
         self.logger.record("video/walk", Video(video, fps=fps), exclude=("stdout", "log", "json", "csv"))
         imageio.mimsave(self.video_dir / "latest.mp4", frames, fps=fps)
+        if self.backward > 0:
+            frames, distance, seconds = self._clip(-self.backward)
+            self.logger.record("video/backward_distance_m", distance)
+            self.logger.record("video/backward_mean_speed", distance / seconds)
+            imageio.mimsave(self.video_dir / f"step_{self.num_timesteps // 1000:06d}k_back{self.backward:.2f}_walked{distance:.2f}m.mp4",
+                            end_of_clip(frames, fps), fps=fps)
         return True
 
 
