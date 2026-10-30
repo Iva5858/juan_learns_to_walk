@@ -22,7 +22,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
-from biped_rl.training.callbacks import SaveVecNormalize, TrainingDashboard, VideoRecorder
+from biped_rl.training.callbacks import CurriculumSnapshot, SaveVecNormalize, TrainingDashboard, VideoRecorder
 from biped_rl.training.ppo import n_steps_for, new_model
 from biped_rl.training.stages import STAGES, apply_stage, load_curriculum, save_curriculum
 
@@ -37,6 +37,7 @@ def parse_value(text):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--run-name", required=True)
+    p.add_argument("--overwrite", action="store_true", help="allow reusing the name of a run that already has a policy")
     p.add_argument("--timesteps", type=int, default=30_000_000)
     p.add_argument("--n-envs", type=int, default=2 * os.cpu_count(),
                    help="simulation workers (default 2 x cores: 36 on this Mac was 43%% faster than 18)")
@@ -51,17 +52,19 @@ def main():
                    help="also chart every single penalty term (for reward tuning)")
     p.add_argument("--lr", type=float, help="learning rate (with --resume: overrides the saved one; "
                    "use smaller values for late fine-tuning, where the policy's noise is tiny)")
-    p.add_argument("--reward", nargs="*", default=[], metavar="NAME=VALUE",
+    p.add_argument("--reward", nargs="*", default=[], action="extend", metavar="NAME=VALUE",
                    help="override reward weights for this run (after --stage), e.g. --reward symmetry=3 gait_mismatch=0.3")
-    p.add_argument("--command", nargs="*", default=[], metavar="NAME=VALUE",
+    p.add_argument("--command", nargs="*", default=[], action="extend", metavar="NAME=VALUE",
                    help="override command settings for this run (after --stage), e.g. --command backward_prob=0.3")
-    p.add_argument("--robot", nargs="*", default=[], metavar="NAME=VALUE",
+    p.add_argument("--robot", nargs="*", default=[], action="extend", metavar="NAME=VALUE",
                    help="override robot / servo settings, e.g. --robot no_load_speed=3.0 kp=6")
-    p.add_argument("--randomization", nargs="*", default=[], metavar="NAME=VALUE",
+    p.add_argument("--randomization", nargs="*", default=[], action="extend", metavar="NAME=VALUE",
                    help="override randomization settings, e.g. --randomization action_delay_steps=1,2")
     args = p.parse_args()
 
     run_dir = Path("runs") / args.run_name
+    if any((run_dir / f).exists() for f in ("final_model.zip", "best_model.zip")) and not args.overwrite:
+        raise SystemExit(f"{run_dir} already holds a trained policy: choose another --run-name (or pass --overwrite)")
     run_dir.mkdir(parents=True, exist_ok=True)
     cfg = EnvConfig.load(args.resume) if args.resume else EnvConfig()
     if args.stage:
@@ -106,7 +109,9 @@ def main():
         model, env = new_model(cfg, env, tensorboard_log=str(run_dir))
     eval_env = VecNormalize(eval_env, training=False, norm_reward=False)
 
+    curriculum = CurriculumSnapshot()
     callbacks = [
+        curriculum,
         TrainingDashboard(cfg, log_details=args.log_details),
         VideoRecorder(cfg, run_dir / "videos", freq=args.video_every),
         CheckpointCallback(save_freq=max(2_000_000 // args.n_envs, 1),
@@ -122,7 +127,7 @@ def main():
         # Saved even on Ctrl+C, so you can stop early and evaluate.
         model.save(run_dir / "final_model")
         env.save(str(run_dir / "vecnormalize.pkl"))
-        save_curriculum(env, run_dir)
+        save_curriculum(env, run_dir, states=curriculum.states)
         # flush: stdout is often redirected to a log; after Ctrl+C the workers may hang on close
         print(f"Saved policy and normalization stats to {run_dir} (safe to Ctrl+C again)", flush=True)
         env.close()

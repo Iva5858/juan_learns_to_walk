@@ -2,7 +2,15 @@
 
 Reinforcement learning for **Juan**, a 43 cm, 8-servo biped. The policy is trained in MuJoCo with PPO and runs on the real robot's Raspberry Pi, steered from a web dashboard.
 
-**Status (October 2026):** Juan walks on the real robot at up to 0.2 m/s, turns, side-steps and survives light shoves, with the policy in `robot/policies/juan_v7_12b_pushes_best.npz`. It weaves left and right while walking straight. The fine-tune for that (v7_13) trains on the servo model fitted from the robot's own walking logs.
+**Status (October 2026):** Juan walks on the real robot at up to 0.2 m/s, turns, side-steps and survives light shoves.
+
+| Policy | Status | On the robot |
+|---|---|---|
+| `juan_v7_13_straight` | **safe**: the straightest walk on hardware (trained on the servo model fitted from the robot's own logs) | in use |
+| `juan_v7_12b_pushes_best` | **safe**: the dashboard default; slightly faster, weaves left and right | fallback |
+| v7_15 (in training) | **experimental**: longer, quicker strides with real foot lift (it shuffles today) | not yet |
+
+Both safe versions ship as robot policies (`robot/policies/`) and as full training states (`checkpoints/`), so either can be run or fine-tuned from.
 
 | | |
 |---|---|
@@ -37,7 +45,7 @@ tensorboard --logdir runs                      # charts while it trains (see doc
 # -> robot/policies/my_run.npz (checked step by step against the simulator) and runs/my_run_report.txt
 ```
 
-`checkpoints/` holds the training state (network, normalization, curricula, config) of the policy on the robot, so you can fine-tune from it. Training outputs go to `runs/<name>/` (not in git). Run everything from the project folder, and keep the project out of iCloud-synced folders: iCloud turns checkpoints into placeholders that hang training.
+`checkpoints/` holds the training state (network, normalization, curricula, config) of the two safe policies, so you can fine-tune from them. Training outputs go to `runs/<name>/` (not in git). Run everything from the project folder, and keep the project out of iCloud-synced folders: iCloud turns checkpoints into placeholders that hang training.
 
 ---
 
@@ -81,7 +89,7 @@ Everything in [robot/](robot/) runs on the Raspberry Pi and needs only `pyserial
 | [biped_rl/training/](biped_rl/training/) | PPO hyperparameters, training stages, TensorBoard dashboard and clips |
 | [biped_rl/policy.py](biped_rl/policy.py), [symmetry.py](biped_rl/symmetry.py), [motions.py](biped_rl/motions.py), [runs.py](biped_rl/runs.py) | Asymmetric mirror-symmetric actor-critic; mirror maps; the boot sequence; loading a trained run |
 | [scripts/](scripts/) | Training, evaluation, export, checks; [analysis/](scripts/analysis/); [model/](scripts/model/) (CAD export → RL model) |
-| [checkpoints/](checkpoints/) | Training state of the policy on the robot, to fine-tune from |
+| [checkpoints/](checkpoints/) | Training state of the safe policies (v7_12b, v7_13), to fine-tune from |
 | [robot/](robot/) | Runs on the Pi; [policies/](robot/policies/) are the exported policies |
 | [juan/](juan/) | The model: Onshape export (`robot.xml`, `scene.xml`, meshes in `assets/`) and the RL-ready `rl_robot.xml` / `rl_scene.xml` |
 | [tests/](tests/) | `pytest`: run before every commit (CI runs them on every push) |
