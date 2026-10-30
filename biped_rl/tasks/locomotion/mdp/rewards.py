@@ -42,7 +42,29 @@ def feet_clearance(env, s, w):
         s.swing * np.exp(-(((env.episode.clearance - c.swing_height) / (0.5 * c.swing_height)) ** 2)))
 
 
-TASK_TERMS = (tracking_vel, tracking_lat_yaw, heading, gait_contact, feet_clearance)
+def step_length(env, s, w):
+    """At each touchdown, how far the foot landed ahead of the other one, in the commanded direction
+    (forward or backward), as a fraction of step_length_target; only feet that lifted at least
+    lift_height count, so sliding a foot forward is not a step. Long steps need the trailing leg to push
+    off behind the body, so this rewards hip extension without prescribing a joint angle."""
+    forward = env.command.forward
+    if w.step_length == 0 or abs(forward) < 0.05 or not s.new_td.any():
+        return 0.0
+    reach = np.clip(np.sign(forward) * s.step_at_touchdown[s.new_td], 0.0, w.step_length_target)
+    return w.step_length * float(reach.sum()) / w.step_length_target
+
+
+def feet_air_time(env, s, w):
+    """At each touchdown, the share of the gait clock's planned swing the foot was actually lifted
+    (sole above lift_height): a foot that taps down early or slides along the floor earns less."""
+    if w.feet_air_time == 0 or env.command.standing or not s.new_td.any():
+        return 0.0
+    planned = env.cfg.command.swing_ratio * commands.gait_period(env)
+    used = np.clip(s.air_at_touchdown[s.new_td] / planned, 0.0, 1.0)
+    return w.feet_air_time * float(used.sum())
+
+
+TASK_TERMS = (tracking_vel, tracking_lat_yaw, heading, gait_contact, feet_clearance, step_length, feet_air_time)
 
 
 # --------------------------------------------------------------------- penalties
@@ -200,9 +222,11 @@ def stand_pose(env, s, w):
 
 
 def stand_still(env, s, w):
-    """Not moving while commanded to walk: 0 at >= half the commanded speed, 1 when stopped."""
+    """Not moving while commanded to walk, forward or backward: 0 at >= half the commanded speed, 1 when
+    stopped. Slow commands count too: from 0.05 m/s (above 0.1 only, the policy learned to stand still
+    at 0.1 m/s and when told to back up)."""
     forward = env.command.forward
-    if forward > 0.1:
+    if abs(forward) > 0.05:
         return w.stand_still * float(np.clip(1.0 - s.vx / (0.5 * forward), 0.0, 1.0))
     return 0.0
 

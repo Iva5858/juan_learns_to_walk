@@ -21,6 +21,7 @@ Forward speed (−0.15 m/s up to a speed curriculum's top), sideways speed (±0.
 | Protect the servos | `servo_load`, `servo_overload`, `servo_saturation`, `backdrive`, `impact`, `joint_limits`, `energy` |
 | Smooth, low-wear motion | `action_rate`, `action_acc`, `joint_acc`, `reversals`, `footstep` |
 | A real walking gait | `gait_contact`, `gait_mismatch`, `feet_clearance`, `foot_slip`, `feet_distance`, `knee_hyperextension`, `hip_roll`, `hip_roll_inward`, `symmetry` |
+| Longer, quicker strides (off by default; on from v7_15) | `step_length` (foot lands ahead of the other in the walking direction, up to 12 cm), `feet_air_time` (foot stays up for the swing the clock plans) |
 
 Speed is measured along the target heading (the start heading, turned only as commanded), so walking in circles earns nothing. A landing above 3× body weight, or a joint forced past 1.3× servo speed while the servo pushes back hard, ends the episode like a fall ("broke").
 

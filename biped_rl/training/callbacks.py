@@ -157,6 +157,23 @@ class VideoRecorder(BaseCallback):
         return True
 
 
+class CurriculumSnapshot(BaseCallback):
+    """Cache worker curriculum state at safe points, for saving after an interrupt."""
+
+    def __init__(self):
+        super().__init__()
+        self.states = None
+
+    def _on_training_start(self):
+        self.states = self.training_env.env_method("curriculum_state")
+
+    def _on_rollout_end(self):
+        self.states = self.training_env.env_method("curriculum_state")
+
+    def _on_step(self):
+        return True
+
+
 class SaveVecNormalize(BaseCallback):
     """Saves the normalization statistics next to best_model.zip whenever EvalCallback saves a new best."""
 

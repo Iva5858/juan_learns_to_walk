@@ -124,6 +124,8 @@ class EpisodeState:
     last_push_vec: np.ndarray = None
     td_step: list = field(default_factory=lambda: [None, None])  # control step of each foot's last touchdown
     stride_est: int = None      # measured steps per stride (from one foot's touchdowns)
+    air_time: np.ndarray = field(default_factory=lambda: np.zeros(2))    # s each foot has been lifted (rewards.lift_height)
+    swing_peak: np.ndarray = field(default_factory=lambda: np.zeros(2))  # highest sole clearance since its last contact
     gyro_filtered: np.ndarray = None  # state of the robot-side gyro low-pass (observations.gyro_seen)
     gyro_reading: np.ndarray = None   # the gyro as the robot's controller gets it
 
@@ -575,6 +577,15 @@ class BipedEnv(gym.Env):
         ep.qd_sign = np.where(sign != 0, sign, ep.qd_sign)
         sole_pos, sole_vel = self.soles()
         ep.clearance = sole_pos[:, 2] - robot.home_sole_z
+        # At each touchdown: how long that foot was really lifted (sole above lift_height: an unloaded foot
+        # skimming the floor doesn't count), and, if it lifted, how far ahead of the other foot it landed
+        # along the target heading (step length; + = ahead). A foot slid forward is not a step.
+        lift = cfg.rewards.lift_height
+        air_at_touchdown = np.where(new_td, ep.air_time, 0.0)
+        ahead = (sole_pos[:, 0] - sole_pos[::-1, 0]) * ch + (sole_pos[:, 1] - sole_pos[::-1, 1]) * sh
+        step_at_touchdown = np.where(new_td & (ep.swing_peak >= lift), ahead, 0.0)
+        ep.air_time = np.where(ep.contact == 1, 0.0, ep.air_time + self.dt * (ep.clearance > lift))
+        ep.swing_peak = np.where(ep.contact == 1, 0.0, np.maximum(ep.swing_peak, ep.clearance))
         leg_phase = (commands.phase(self) + np.array([0.0, 0.5])) % 1.0
         swing = leg_phase < cfg.command.swing_ratio
         if cmd.standing:
@@ -585,7 +596,8 @@ class BipedEnv(gym.Env):
         return SimpleNamespace(
             action=action, cmd=(cvx, cvy, cwz), R=R, grav=grav, vx=vx, vy=vy, yaw_err=yaw_err, offset=offset,
             ang_world=R @ d.qvel[3:6], qd=qd, qacc=qacc, q=q, touchdowns=touchdowns, reversals=reversals,
-            sole_vel=sole_vel, swing=swing, bad_contact=bad_contact,
+            sole_vel=sole_vel, swing=swing, bad_contact=bad_contact, new_td=new_td,
+            air_at_touchdown=air_at_touchdown, step_at_touchdown=step_at_touchdown,
             feet_y=(R.T @ (d.xpos[robot.foot_bodies[0]] - d.xpos[robot.foot_bodies[1]]))[1],
             peak_force=phys.peak_force, saturated=phys.saturated, overload=phys.overload,
             overspeed=phys.overspeed, peak_tau=phys.peak_tau, peak_speed_ratio=phys.peak_speed_ratio,

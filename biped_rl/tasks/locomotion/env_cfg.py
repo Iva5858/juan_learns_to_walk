@@ -81,6 +81,11 @@ class RewardWeights:
     heading: float = 1.0                    # facing the target heading
     gait_contact: float = 1.0               # feet on the ground when the gait clock says stance
     feet_clearance: float = 0.3             # swing sole reaches swing_height (no shuffling, no toe drag)
+    # Faster, longer-striding gaits (0 = off; juan_v7_15 on). Both pay once per touchdown.
+    step_length: float = 0.0                # foot lands ahead of the other one in the walking direction,
+    step_length_target: float = 0.12        # ...up to this far [m] (speed = step length x cadence)
+    feet_air_time: float = 0.0              # foot stays up for the swing the gait clock plans (no early taps)
+    lift_height: float = 0.01               # m: a foot counts as stepping only above this (not skimming the floor)
     # --- survival ---
     alive: float = 0.2                      # small: survival alone must not be worth standing still for
     termination: float = -10.0              # once, on a fall or a hardware limit

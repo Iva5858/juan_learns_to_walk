@@ -10,7 +10,8 @@ What it does:
   * joint conventions = the training conventions (torso frame x forward, y left, z up):
     roll joints rotate about +x, pitch joints (hip pitch, knee, ankle) about +y. So hip pitch
     negative = leg forward, knee positive = bends back, ankle negative = toes up
-  * hip roll range: 5 deg inward / 25 deg outward on both legs (direction measured on the model)
+  * hip roll range: 7 deg inward / 25 deg outward on both legs (direction measured on the model);
+    hip pitch, knee and ankle ranges: PITCH_RANGE_DEG (the robot's measured ranges, minus a margin)
   * removes any coupling between joints (Onshape gear relations) and gives all 8 joints a servo
   * foot soles = flat boxes + rubber pads (stable contact instead of mesh hulls), capsules on
     thighs and shins (legs cannot pass through each other; knee on the floor = a fall)
@@ -73,7 +74,10 @@ ACTUATOR_ORDER = ("left_hip_roll", "left_hip_pitch", "left_knee", "left_ankle",
 FEET = ("left_foot_link", "right_foot_link")
 LEG_CAPSULES = {"left_thigh_link": "left_shin_link", "left_shin_link": "left_foot_link",
                 "right_thigh_link": "right_shin_link", "right_shin_link": "right_foot_link"}
-ROLL_INWARD_DEG, ROLL_OUTWARD_DEG = 5.0, 25.0
+ROLL_INWARD_DEG, ROLL_OUTWARD_DEG = 7.0, 25.0
+# Pitch-joint ranges (deg, training conventions): the robot's measured ranges minus a 5 deg margin,
+# the narrower of the two legs (the policy is mirror-symmetric).
+PITCH_RANGE_DEG = {"hip_pitch": (-110.0, 68.0), "knee": (-40.0, 114.0), "ankle": (-74.0, 72.0)}
 HOME = {"hip_roll": 0.0, "hip_pitch": -0.4, "knee": 0.8, "ankle": -0.4}  # rad, training conventions
 
 
@@ -207,11 +211,14 @@ def main():
                 j.set("range", fmt([-hi, -lo]))
             report.append(f"flipped {name} to match training conventions")
 
-    # ---- hip roll limits: 5 deg inward / 25 deg outward (roll axis is +x now: left outward = +)
+    # ---- hip roll limits: 7 deg inward / 25 deg outward (roll axis is +x now: left outward = +)
     for name in ROLL:
         out_sign = 1.0 if name.startswith("left") else -1.0
         lim = sorted([out_sign * np.radians(ROLL_OUTWARD_DEG), -out_sign * np.radians(ROLL_INWARD_DEG)])
         joints[name].set("range", fmt(lim))
+    for name in PITCH:
+        lo, hi = PITCH_RANGE_DEG[name.split("_", 1)[1]]
+        joints[name].set("range", fmt(np.radians([lo, hi])))
 
     # ---- feet: flat sole box + rubber pad instead of the mesh hull; capsules on thighs/shins
     model = compile_xml(tree, tmp)

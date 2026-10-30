@@ -54,8 +54,11 @@ def apply_stage(cfg, stage):
 # Curriculum levels live in the env processes and would start over with every new run; they are
 # saved at the end of a run and restored when another run resumes from it. (Through env methods:
 # VecEnv.set_attr only reaches the Monitor wrapper, not the environment inside it.)
-def save_curriculum(env, run_dir):
-    states = env.env_method("curriculum_state")
+def save_curriculum(env, run_dir, states=None):
+    # A cached snapshot is safe even if Ctrl+C interrupted a pending VecEnv step:
+    # asking the same pipes for curriculum state then can read stale step replies.
+    if states is None:
+        states = env.env_method("curriculum_state")
     state = {k: np.mean([st[k] for st in states], axis=0).tolist() for k in states[0]}
     (run_dir / "curriculum.json").write_text(json.dumps(state, indent=2))
 
@@ -65,4 +68,5 @@ def load_curriculum(env, run_dir):
     if path.exists():
         state = json.loads(path.read_text())
         env.env_method("set_curriculum_state", state)
-        print(f"curriculum from {path}: {state}", flush=True)
+        restored = env.env_method("curriculum_state")[0]
+        print(f"curriculum from {path}: {restored}", flush=True)
