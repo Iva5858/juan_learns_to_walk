@@ -346,7 +346,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the browser stopped waiting (slow request, page reloaded): what was asked still happened
 
     def result(self, error=None, **extra):
         self.reply(200 if error is None else 409, json.dumps({"error": error, **extra}).encode())
@@ -434,6 +437,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.result(robot.personality.set_faces(q.get("on") == "1"))
             elif p == "/listen":
                 self.result(robot.personality.set_listening(q.get("on") == "1"))
+            elif p == "/voice":  # a phrase heard by a microphone elsewhere (python -m robot.voice_commands --robot)
+                from robot.voice_commands import parse
+                action = parse(q.get("text", ""))
+                if action:
+                    robot.personality._voice_command(action, q["text"])
+                self.result(None if action else "not a known command", action=action)
             elif p == "/spin":
                 self.result(robot.personality.victory_spin())
             elif p == "/playful":

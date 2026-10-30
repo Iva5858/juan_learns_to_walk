@@ -40,7 +40,7 @@ ssh "$PI" "ls $DIR/robot/policies/ | sed 's/^/   /'"
 
 if [[ ${1:-} == --install ]]; then
     echo "=== 3/3 packages for voice and faces"
-    ssh -t "$PI" "sudo apt-get install -y python3-opencv && pip3 install --user --break-system-packages 'vosk==0.3.44' sounddevice"
+    ssh -t "$PI" "sudo apt-get install -y python3-opencv libportaudio2 &&pip3 install --user --break-system-packages 'vosk==0.3.44' sounddevice"
 else
     echo "=== 3/3 packages: skipped (add --install the first time)"
 fi

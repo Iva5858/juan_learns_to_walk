@@ -4,6 +4,8 @@ testing, a USB microphone on the robot.
 
     python -m robot.voice_commands            # listen and print what it understood (Ctrl+C stops)
     python -m robot.voice_commands --wake     # only react to phrases starting with "Juan"
+    python -m robot.voice_commands --wake --robot juanpi.local   # this computer's microphone steers the
+                                              # robot: each phrase goes to its dashboard (port 8000)
 
 Setup: pip install "vosk==0.3.44" sounddevice (the project's "voice" extra), and the small English
 model (about 70 MB) unzipped into robot/models/:
@@ -104,14 +106,25 @@ class VoiceCommands:
 if __name__ == "__main__":
     import sys
     import time
+    import urllib.parse
+    import urllib.request
 
     from robot.sound import Voice
-    voice = Voice()
     wake = "--wake" in sys.argv
+    robot_host = sys.argv[sys.argv.index("--robot") + 1] if "--robot" in sys.argv else None
+    voice = None if robot_host else Voice()
 
     def command(action, text):
         print(f"  -> {action}", flush=True)
-        voice.say("ok")
+        if not robot_host:
+            voice.say("ok")
+            return
+        url = f"http://{robot_host}:8000/voice?" + urllib.parse.urlencode({"text": text})
+        try:
+            reply = json.loads(urllib.request.urlopen(url, timeout=3).read())
+            print(f"     robot: {reply.get('error') or 'ok'}", flush=True)
+        except Exception as e:  # robot not reachable, dashboard not running
+            print(f"     robot not reached: {e}", flush=True)
 
     listener = VoiceCommands(command, on_heard=lambda t: print(f"heard: {t!r}", flush=True), wake=wake)
     print("Listening" + (' (start with "Juan")' if wake else "") + ". Try: walk, stop, turn left, back, faster, "
