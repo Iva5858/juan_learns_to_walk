@@ -116,12 +116,10 @@ def end_of_clip(frames, fps):
 
 def clip_commands(cfg, speed_max):
     """What to film: one clip per kind of command the run trains on, at the speed it trains at now.
-    [(label, (forward, sideways, turn rate))]: "run" for a free run (its one command, or the top forward speed shown), "fwd" at the speed
-    curriculum's top if forward commands are in the mix, "back" at the top backward speed, "side" at the top
-    sideways speed, "turn" at the top turn rate in place; only the kinds with a share in the mix."""
+    [(label, (forward, sideways, turn rate))]: "fwd" at the speed curriculum's top if forward commands are in
+    the mix, "back" at the top backward speed, "side" at the top sideways speed, "turn" at the top turn rate in
+    place; only the kinds with a share in the mix."""
     c = cfg.command
-    if c.fixed_forward > 0 or cfg.rewards.forward_speed > 0:  # it runs whatever it's shown
-        return [("run", (c.fixed_forward or float(speed_max), 0.0, 0.0))]
     exclusive = c.turn_in_place_prob + c.backward_prob + c.sideways_prob + c.fast_prob
     mixed = exclusive < 1.0  # the rest of the commands: forward speeds from [-backward_speed, top]
     clips = []
@@ -278,35 +276,6 @@ class CurriculumSnapshot(BaseCallback):
         self.states = self.training_env.env_method("curriculum_state")
 
     def _on_step(self):
-        return True
-
-
-class CriticWarmup(BaseCallback):
-    """For the first `steps` of a run, train only the value function: the actor (a pre-trained policy,
-    scripts/pretrain_reference.py) keeps its weights and noise while the critic learns what its states are
-    worth, so the first updates don't push it around with a random critic's advantages."""
-
-    def __init__(self, steps):
-        super().__init__()
-        self.steps, self.frozen = steps, []
-
-    def _actor_params(self):
-        pol = self.model.policy
-        return [*pol.mlp_extractor.policy_net.parameters(), *pol.action_net.parameters(), pol.log_std]
-
-    def _on_training_start(self):
-        self.start = self.num_timesteps
-        self.frozen = [p for p in self._actor_params() if p.requires_grad]
-        for p in self.frozen:
-            p.requires_grad_(False)
-        print(f"critic warm-up: actor frozen for {self.steps:,} steps", flush=True)
-
-    def _on_step(self):
-        if self.frozen and self.num_timesteps - self.start >= self.steps:
-            for p in self.frozen:
-                p.requires_grad_(True)
-            self.frozen = []
-            print("critic warm-up done: actor training", flush=True)
         return True
 
 

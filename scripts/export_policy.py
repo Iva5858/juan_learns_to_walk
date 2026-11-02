@@ -15,10 +15,9 @@ import json
 from pathlib import Path
 
 import numpy as np
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from biped_rl.robots import PROJECT
+from biped_rl.runs import load_policy
 from biped_rl.symmetry import mirror_maps
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 from biped_rl.tasks.locomotion.mdp import observations
@@ -37,12 +36,10 @@ def top_speed(run, c):
 
 
 def export(run, out):
-    cfg = EnvConfig.from_dict(json.loads((run / "config.json").read_text()))
+    cfg = EnvConfig.load(run)
     cfg.randomization.enabled = False
     env = BipedEnv(cfg.to_dict())
-    model = PPO.load(run / "final_model", device="cpu")
-    norm = VecNormalize.load(str(run / "vecnormalize.pkl"), DummyVecEnv([lambda: BipedEnv(cfg.to_dict())]))
-    norm.training = False
+    model, norm = load_policy(run, cfg)
     p = model.policy
     names = [env.model.joint(int(j)).name for j in env.model.dof_jntid[env.robot.dof_idx]]
     if tuple(names) != NAMES:

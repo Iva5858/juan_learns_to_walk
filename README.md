@@ -4,15 +4,16 @@ Reinforcement learning for **Juan**, a 43 cm, 8-servo biped. The policy is train
 
 > **Note:** this is a personal research project, developed in the open and changing often: the `dev` branch is work in progress, and results and policies are tested only on this one robot. Running a policy on other hardware is at your own risk. Issues and questions are welcome, but there is no support. Code under Apache 2.0, robot design and policies under CC BY-NC 4.0 (see [NOTICE](NOTICE)).
 
-**Status (October 2026):** Juan walks on the real robot at up to 0.2 m/s, turns, side-steps and survives light shoves.
+**Status (November 2026):** Juan walks on the real robot at up to ~0.2 m/s, turns, side-steps and survives light shoves.
 
 | Policy | Status | On the robot |
 |---|---|---|
-| `juan_v7_13_straight` | **safe**: the straightest walk on hardware (trained on the servo model fitted from the robot's own logs) | in use |
+| `juan_v7_24_speed` | **experimental**: v7_21 trained for speed; in the simulator 0.22 m/s at 0.4+ m/s commands (v7_21: 0.12) and fewer falls | to be tested |
+| `juan_v7_21_steady` | **good**: v7_13 made steadier; ~0.18 m/s at a 0.4 m/s command | in use |
+| `juan_v7_13_straight` | **safe**: the straightest walk on hardware (trained on the servo model fitted from the robot's own logs) | fallback |
 | `juan_v7_12b_pushes_best` | **safe**: the dashboard default; slightly faster, weaves left and right | fallback |
-| v7_15 (in training) | **experimental**: longer, quicker strides with real foot lift (it shuffles today) | not yet |
 
-Both safe versions ship as robot policies (`robot/policies/`) and as full training states (`checkpoints/`), so either can be run or fine-tuned from.
+All four ship as robot policies (`robot/policies/`); the two safe ones also as full training states (`checkpoints/`), to fine-tune from. How each fine-tune was made: [docs/training.md](docs/training.md#fine-tune-recipes).
 
 | | |
 |---|---|
@@ -38,13 +39,12 @@ mjpython scripts/play.py                       # boot sequence, then the policy;
 
 # how well does it walk?
 python scripts/evaluate.py -n 3                # speed, gait, impacts, smoothness; video in out/eval/
-python scripts/analysis/straight.py checkpoints/juan_v7_12b_pushes_best    # drift, turning and weave
-python scripts/analysis/falls.py checkpoints/juan_v7_12b_pushes_best       # falls with and without shoves
+python scripts/analysis/walk_test.py checkpoints/juan_v7_13_straight      # speed, falls, drift, weave, gait at 0.1-0.6 m/s
 
-# fine-tune it, export it for the robot and compare it with the start: ~1 h on an 18-core Mac
-./scripts/finetune.sh v7/juan_v7_21_my_run    # extra options go to train.py, e.g. --reward heading=3.0
+# fine-tune it, export it for the robot and judge it against the start: ~1.5 h on an 18-core Mac
+./scripts/finetune.sh v7/juan_v7_25_my_run    # extra options go to train.py, e.g. --reward heading=3.0
 tensorboard --logdir runs                      # charts while it trains (see docs/training.md)
-# -> robot/policies/juan_v7_21_my_run.npz (checked step by step against the simulator), runs/logs/v7/juan_v7_21_my_run_report.txt
+# -> robot/policies/juan_v7_25_my_run.npz (checked step by step against the simulator), runs/logs/v7/juan_v7_25_my_run_report.txt
 ```
 
 `checkpoints/` holds the training state (network, normalization, curricula, config) of the two safe policies, so you can fine-tune from them. Training outputs go to `runs/<generation>/<name>/` (not in git; layout, names and the run index: [docs/runs.md](docs/runs.md)). Run everything from the project folder, and keep the project out of iCloud-synced folders: iCloud turns checkpoints into placeholders that hang training.
@@ -95,7 +95,7 @@ Everything in [robot/](robot/) runs on the Raspberry Pi and needs only `pyserial
 | [robot/](robot/) | Runs on the Pi; [policies/](robot/policies/) are the exported policies |
 | [juan/](juan/) | The model: Onshape export (`robot.xml`, `scene.xml`, meshes in `assets/`) and the RL-ready `rl_robot.xml` / `rl_scene.xml` |
 | [tests/](tests/) | `pytest`: run before every commit (CI runs them on every push) |
-| [docs/](docs/) | [training.md](docs/training.md), [robot.md](docs/robot.md), [bringup.md](docs/bringup.md) |
+| [docs/](docs/) | [training.md](docs/training.md), [robot.md](docs/robot.md), [bringup.md](docs/bringup.md), [runs.md](docs/runs.md) |
 
 ---
 

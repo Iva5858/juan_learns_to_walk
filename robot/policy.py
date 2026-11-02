@@ -19,34 +19,6 @@ import numpy as np
 MAX_HEADING_ERROR = math.radians(110)  # training never goes past ~111 deg; the wrap is at 180
 
 
-def action_reach(action_scale, home, lo, hi):
-    """What an action means, per joint: (pivot, up, down) in rad. Action 0 = the pivot pose, +1 / -1 =
-    pivot + up / pivot - down. A number: pivot = home, the same reach up and down (then clipped to the
-    joint limits). "limits": pivot = home, +1 / -1 = the joint's upper / lower limit. "limits_straight":
-    the same, pivoting at straight legs (joint angle 0) instead of the home crouch, so neither knee
-    direction is the default."""
-    home, lo, hi = (np.asarray(x, dtype=np.float64) for x in (home, lo, hi))
-    if isinstance(action_scale, str):
-        if action_scale == "limits":
-            return home, hi - home, home - lo
-        if action_scale == "limits_straight":
-            return np.zeros_like(home), hi, -lo
-        raise ValueError(f"unknown action_scale {action_scale!r}")
-    s = np.full_like(home, float(action_scale))
-    return home, s, s
-
-
-def action_to_target(action, pivot, up, down, lo, hi):
-    """Joint targets (rad) for a (filtered) action in [-1, 1]."""
-    return np.clip(pivot + np.where(action > 0, action * up, action * down), lo, hi)
-
-
-def target_to_action(q, pivot, up, down):
-    """The action that holds joint angles q (the filter's state when the policy takes over from a pose)."""
-    d = np.asarray(q, dtype=np.float64) - pivot
-    return np.clip(np.where(d > 0, d / up, d / down), -1.0, 1.0)
-
-
 class Policy:
     def __init__(self, path):
         f = np.load(path, allow_pickle=False)
@@ -86,9 +58,7 @@ class Controller:
         self.history = int(m["history"])
         self.home = m["home"].astype(np.float64)
         self.lo, self.hi = m["joint_lo"], m["joint_hi"]
-        scale = m["action_scale"]
-        scale = str(scale) if scale.dtype.kind in "US" else float(scale)
-        self.pivot, self.up, self.down = action_reach(scale, self.home, self.lo, self.hi)
+        self.scale = np.asarray(m["action_scale"], dtype=np.float64)  # rad per unit action, around home
         self.filter_a = float(m["action_filter"])
         self.period, self.period_fast = float(m["gait_period"]), float(m["gait_period_fast"])
         self.fast_speed = float(m["fast_speed"])
@@ -112,11 +82,11 @@ class Controller:
 
     def start(self, sensors, phase=0.0):
         """Hand over to the policy from the current pose (as env.start_policy): heading = now,
-        histories filled with the current reading, previous action at zero, the filter holding home."""
+        histories filled with the current reading, previous action and filter at zero (holding home)."""
         n = len(self.home)
         self.heading_target = sensors["yaw"]
         self.phase = phase
-        self.filtered = target_to_action(np.clip(self.home, self.lo, self.hi), self.pivot, self.up, self.down)
+        self.filtered = np.zeros(n)
         self.sensor_buf = deque([self._reading(sensors)] * self.history, maxlen=self.history)
         self.action_buf = deque([np.zeros(n)] * self.history, maxlen=self.history)
         self.target = np.clip(self.home.copy(), self.lo, self.hi)
@@ -144,7 +114,7 @@ class Controller:
         full[:len(obs)] = obs  # the privileged part (critic only) stays zero
         action = self.policy(full)
         self.filtered = self.filter_a * action + (1 - self.filter_a) * self.filtered
-        self.target = action_to_target(self.filtered, self.pivot, self.up, self.down, self.lo, self.hi)
+        self.target = np.clip(self.home + self.scale * self.filtered, self.lo, self.hi)
         self.action_buf.append(action)
         self.last_obs, self.last_action = obs, action
         # The clocks advance over the step this action runs for, at the command in force now (as

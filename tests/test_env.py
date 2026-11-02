@@ -50,54 +50,19 @@ def test_hip_roll_outward_signs():
     assert env.robot.roll_out_sign.tolist() == [1.0, -1.0]
 
 
-def test_limits_action_scale_spans_each_joints_range():
-    from robot.policy import action_reach, action_to_target
-    cfg = EnvConfig()
-    cfg.action_scale = "limits"
-    env = BipedEnv(cfg.to_dict())
+def test_actions_offset_the_home_pose():
+    """Action a holds home + action_scale * a (the robot's controller does the same), from a filter at zero."""
+    env = BipedEnv(EnvConfig().to_dict())
+    env.reset(seed=0)
     r = env.robot
-    pivot, up, down = action_reach("limits", r.home_joint, r.joint_lo, r.joint_hi)
-    assert np.allclose(action_to_target(np.ones(env.nu), pivot, up, down, r.joint_lo, r.joint_hi), r.joint_hi)
-    assert np.allclose(action_to_target(-np.ones(env.nu), pivot, up, down, r.joint_lo, r.joint_hi), r.joint_lo)
-    assert np.allclose(action_to_target(np.zeros(env.nu), pivot, up, down, r.joint_lo, r.joint_hi), r.home_joint)
-    # a number keeps the classic mapping
-    pivot, up, down = action_reach(0.5, r.home_joint, r.joint_lo, r.joint_hi)
-    a = np.full(env.nu, 0.4)
-    assert np.allclose(action_to_target(a, pivot, up, down, r.joint_lo, r.joint_hi),
-                       np.clip(r.home_joint + 0.2, r.joint_lo, r.joint_hi))
-
-
-def test_straight_pivot_and_start_poses():
-    from robot.policy import action_reach, action_to_target, target_to_action
-    cfg = EnvConfig()
-    cfg.action_scale, cfg.start_poses = "limits_straight", ("home", "knees_back", "straight")
-    cfg.randomization.enabled = False  # no varied starting crouch: check the poses themselves
-    env = BipedEnv(cfg.to_dict())
-    r = env.robot
-    pivot, up, down = action_reach("limits_straight", r.home_joint, r.joint_lo, r.joint_hi)
-    assert np.allclose(action_to_target(np.zeros(env.nu), pivot, up, down, r.joint_lo, r.joint_hi), 0.0)
-    assert np.allclose(action_to_target(np.ones(env.nu), pivot, up, down, r.joint_lo, r.joint_hi), r.joint_hi)
-    a = target_to_action(r.home_joint, pivot, up, down)  # the filter holds home when the policy takes over
-    assert np.allclose(action_to_target(a, pivot, up, down, r.joint_lo, r.joint_hi), r.home_joint)
-    seen = set()
-    for seed in range(12):
-        env.reset(seed=seed)
-        q = env.data.qpos[r.qpos_idx]
-        name = min(r.poses, key=lambda k: np.abs(q - r.poses[k]).max())
-        assert np.abs(q - r.poses[name]).max() < 0.06, name  # each start is one of the poses (+ noise)
-        assert np.allclose(action_to_target(env.episode.filtered, pivot, up, down, r.joint_lo, r.joint_hi),
-                           env.episode.target, atol=1e-9)  # no jump at the first step
-        seen.add(name)
-    assert seen == {"home", "knees_back", "straight"}
-    assert r.poses["knees_back"][r.knee_idx].max() < 0  # knees bent backwards
+    assert np.array_equal(env.episode.filtered, np.zeros(env.nu)) and np.array_equal(env.episode.target, r.home_joint)
+    env.step(np.full(env.nu, 0.4))  # the filter passes half (action_filter 0.5) of it
+    assert np.allclose(env.episode.target_buf[-1], np.clip(r.home_joint + 0.5 * 0.2, r.joint_lo, r.joint_hi))
 
 
 def test_clips_follow_what_the_run_trains_on():
     from biped_rl.training.callbacks import clip_commands
     from biped_rl.training.stages import apply_stage
-    cfg = EnvConfig()
-    cfg.command.fixed_forward = 1.0
-    assert clip_commands(cfg, 0.4) == [("run", (1.0, 0.0, 0.0))]
     cfg = EnvConfig()
     apply_stage(cfg, "walk")
     assert clip_commands(cfg, 0.1) == [("fwd", (0.1, 0.0, 0.0))]          # the speed it trains at, nothing else

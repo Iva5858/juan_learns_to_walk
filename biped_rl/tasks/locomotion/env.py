@@ -21,7 +21,6 @@ from gymnasium import spaces
 from biped_rl.robots import resolve_model_path
 from biped_rl.tasks.locomotion.env_cfg import EnvConfig
 from biped_rl.tasks.locomotion.mdp import commands, curriculums, events, observations, rewards, terminations
-from robot.policy import action_reach, action_to_target, target_to_action
 
 
 @dataclass
@@ -254,16 +253,6 @@ class BipedEnv(gym.Env):
         self._home_key = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_KEY, "home")
         self._reset_to_home()
         robot.home_joint = self.data.qpos[robot.qpos_idx].copy()
-        # How far +1 / -1 reaches from home, per joint (robot/policy.py does the same on the robot); for the
-        # smoothness penalties, the average reach relative to the classic 0.5 rad (see rewards.action_rate)
-        robot.action_pivot, robot.action_up, robot.action_down = action_reach(
-            self.cfg.action_scale, robot.home_joint, robot.joint_lo, robot.joint_hi)
-        # Starting poses (EnvConfig.start_poses): the home crouch, its mirror with the knees bent backwards
-        # (hip pitch, knee and ankle negated: feet still flat, torso upright), and straight legs
-        pitch = np.isin(np.arange(self.nu), robot.hip_roll_idx, invert=True)
-        robot.poses = {"home": robot.home_joint.copy(), "straight": np.zeros(self.nu),
-                       "knees_back": np.where(pitch, -robot.home_joint, robot.home_joint)}
-        robot.action_radians = ((robot.action_up + robot.action_down) / 2 / 0.5) ** 2
         # Height = centre of mass, not the root body's origin: CAD exports often put the base frame
         # origin somewhere arbitrary (e.g. at floor level).
         robot.home_height = self.com_height()
@@ -408,8 +397,7 @@ class BipedEnv(gym.Env):
         cfg, m, d, sv, ep, robot = self.cfg, self.model, self.data, self.servo, self.episode, self.robot
         a = cfg.action_filter
         ep.filtered = a * action + (1 - a) * ep.filtered
-        new_target = action_to_target(ep.filtered, robot.action_pivot, robot.action_up, robot.action_down,
-                                      robot.joint_lo, robot.joint_hi)
+        new_target = np.clip(robot.home_joint + cfg.action_scale * ep.filtered, robot.joint_lo, robot.joint_hi)
         ep.target_buf.append(new_target)
         new_target = ep.target_buf[-1 - min(sv.action_delay, len(ep.target_buf) - 1)]  # bus delay
         w = cfg.rewards
@@ -452,12 +440,6 @@ class BipedEnv(gym.Env):
         else:
             events.set_nominal_physics(self)
         self._reset_to_home()
-        reference_start = tuple(cfg.start_poses) == ("reference",)
-        if tuple(cfg.start_poses) != ("home",) and not reference_start:  # a crouch either way, or straight legs
-            pose = self.robot.poses[cfg.start_poses[rng.integers(len(cfg.start_poses))]]
-            d.qpos[self.robot.qpos_idx] = np.clip(pose, self.robot.joint_lo, self.robot.joint_hi)
-            mujoco.mj_forward(self.model, d)
-            self.ground()
         # Random start heading: the policy must learn "hold the heading you started with", not
         # "walk along world +x".
         cmd.heading0 = rng.uniform(-np.pi, np.pi) if cfg.randomization.enabled else 0.0
@@ -473,41 +455,17 @@ class BipedEnv(gym.Env):
         mujoco.mj_forward(self.model, d)
         if cfg.randomization.enabled:
             events.vary_start_state(self)
-        obs = self._start_episode(options or {})
-        if reference_start:
-            obs = self._start_at_reference(), {}
-        return obs
+        return self._start_episode(options or {})
 
-    def _start_at_reference(self):
-        """Start standing in the reference gait's pose for the first command, the servos already holding it
-        (start_poses ("reference",)): from any other crouch the first steps would jump to it (juan_v9:
-        episodes ended in 4 steps on a 4x body-weight landing)."""
-        from biped_rl.tasks.locomotion.mdp import reference
-        d, ep, r = self.data, self.episode, self.robot
-        pose = np.clip(reference.pose_now(self) + self.np_random.uniform(-0.02, 0.02, self.nu), r.joint_lo, r.joint_hi)
-        d.qpos[r.qpos_idx] = pose
-        d.qvel[r.dof_idx] = 0.0
-        mujoco.mj_forward(self.model, d)
-        self.ground()
-        ep.target = pose.copy()
-        ep.filtered = target_to_action(pose, r.action_pivot, r.action_up, r.action_down)
-        ep.target_buf.extend([pose] * ep.target_buf.maxlen)
-        ep.last_qvel = d.qvel[r.dof_idx].copy()
-        ep.clearance = self.soles()[0][:, 2] - r.home_sole_z
-        reading = observations.read_sensors(self)
-        ep.sensor_buf.extend([reading] * ep.sensor_buf.maxlen)
-        return observations.compute(self)
-
-    def _start_episode(self, options, start=None):
-        """Everything an episode starts with besides the physics: commands, timers, histories."""
+    def _start_episode(self, options):
+        """Everything an episode starts with besides the physics: commands, timers, histories. The servos
+        hold home, as on the robot."""
         cfg, rng, d, robot = self.cfg, self.np_random, self.data, self.robot
         commands.reset(self, options)
         stride_len = int(cfg.command.gait_period / self.dt) + 2
         self.command.phase = rng.uniform()
-        if start is None:  # handing over from a scripted pose (start_policy) holds home, as the robot does
-            start = robot.home_joint.copy() if tuple(cfg.start_poses) == ("home",) else d.qpos[robot.qpos_idx].copy()
         self.episode = ep = EpisodeState(
-            target=start, filtered=target_to_action(start, robot.action_pivot, robot.action_up, robot.action_down),
+            target=robot.home_joint.copy(), filtered=np.zeros(self.nu),
             target_buf=deque(maxlen=cfg.randomization.action_delay_steps[1] + 1),
             sensor_buf=deque(maxlen=cfg.history + cfg.randomization.obs_delay_steps[1]),
             action_buf=deque(maxlen=cfg.history),
@@ -596,8 +554,6 @@ class BipedEnv(gym.Env):
         vel_xy = (d.qpos[0:2] - phys.xy_before) / self.dt
         vx = ch * vel_xy[0] + sh * vel_xy[1]
         vy = -sh * vel_xy[0] + ch * vel_xy[1]
-        # The free run's speed: along the start heading, whatever is commanded (forward_speed).
-        run_vx = np.cos(cmd.heading0) * vel_xy[0] + np.sin(cmd.heading0) * vel_xy[1]
         yaw_err = commands.heading_error(self)
         # Commanded path: the reference moves sideways as commanded and is pulled along the heading
         # to wherever the robot is, so only sideways drift counts.
@@ -626,14 +582,10 @@ class BipedEnv(gym.Env):
         # At each touchdown: how long that foot was really lifted (sole above lift_height: an unloaded foot
         # skimming the floor doesn't count), and, if it lifted, how far ahead of the other foot it landed
         # along the target heading (step length; + = ahead). A foot slid forward is not a step.
-        # With lift_partial, a lower foot counts in proportion (5 mm up = half) instead of not at all.
         lift = cfg.rewards.lift_height
         air_at_touchdown = np.where(new_td, ep.air_time, 0.0)
         ahead = (sole_pos[:, 0] - sole_pos[::-1, 0]) * ch + (sole_pos[:, 1] - sole_pos[::-1, 1]) * sh
-        if cfg.rewards.lift_partial:
-            lifted, up = np.clip(ep.swing_peak / lift, 0.0, 1.0), np.clip(ep.clearance / lift, 0.0, 1.0)
-        else:
-            lifted, up = (ep.swing_peak >= lift).astype(float), (ep.clearance > lift).astype(float)
+        lifted, up = (ep.swing_peak >= lift).astype(float), (ep.clearance > lift).astype(float)
         step_at_touchdown = np.where(new_td, ahead * lifted, 0.0)
         ep.air_time = np.where(ep.contact == 1, 0.0, ep.air_time + self.dt * up)
         ep.swing_peak = np.where(ep.contact == 1, 0.0, np.maximum(ep.swing_peak, ep.clearance))
@@ -644,13 +596,13 @@ class BipedEnv(gym.Env):
         q = d.qpos[robot.qpos_idx]
         ep.q_hist.append(q.copy())
         ep.td_hist.append(touchdowns)
+        feet_x, feet_y = (R.T @ (d.xpos[robot.foot_bodies[0]] - d.xpos[robot.foot_bodies[1]]))[:2]
         return SimpleNamespace(
-            action=action, cmd=(cvx, cvy, cwz), R=R, grav=grav, vx=vx, vy=vy, run_vx=run_vx, yaw_err=yaw_err, offset=offset,
+            action=action, cmd=(cvx, cvy, cwz), R=R, grav=grav, vx=vx, vy=vy, yaw_err=yaw_err, offset=offset,
             ang_world=R @ d.qvel[3:6], qd=qd, qacc=qacc, q=q, touchdowns=touchdowns, reversals=reversals,
             sole_vel=sole_vel, swing=swing, bad_contact=bad_contact, new_td=new_td,
             air_at_touchdown=air_at_touchdown, step_at_touchdown=step_at_touchdown,
-            feet_x=(R.T @ (d.xpos[robot.foot_bodies[0]] - d.xpos[robot.foot_bodies[1]]))[0],
-            feet_y=(R.T @ (d.xpos[robot.foot_bodies[0]] - d.xpos[robot.foot_bodies[1]]))[1],
+            feet_x=feet_x, feet_y=feet_y,
             peak_force=phys.peak_force, saturated=phys.saturated, overload=phys.overload,
             overspeed=phys.overspeed, peak_tau=phys.peak_tau, peak_speed_ratio=phys.peak_speed_ratio,
             loaded_overspeed=phys.loaded_overspeed, energy=phys.energy, load=phys.load)
@@ -711,13 +663,13 @@ class BipedEnv(gym.Env):
     def start_policy(self, options=None):
         """Hand over to the policy from wherever the robot is now (after a scripted motion), the way
         the real robot will: the start heading is the current one, histories are filled with the
-        current readings, the last action and the filter are zero. Returns the observation."""
+        current readings, the last action and the filter are zero (holding home). Returns the observation."""
         cmd = self.command
         cmd.heading0 = self.yaw()
         cmd.heading_target = cmd.heading0
         cmd.start_xy = self.data.qpos[0:2].copy()
         cmd.ref_xy = cmd.start_xy.copy()
-        return self._start_episode(options or {"stand": True}, start=self.robot.home_joint.copy())[0]
+        return self._start_episode(options or {"stand": True})[0]
 
     # ------------------------------------------------------------------ render
     def render(self):

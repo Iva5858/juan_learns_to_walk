@@ -1,5 +1,4 @@
 """PPO setup (Stable-Baselines3): hyperparameters and a fresh model with its normalization."""
-import numpy as np
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecNormalize
@@ -56,17 +55,4 @@ def new_model(cfg, env, tensorboard_log=None, actor=None, log_std_init=None):
                                **({"net_arch": {**POLICY_CFG["net_arch"], "pi": list(actor)}} if actor else {}),
                                **({"log_std_init": log_std_init} if log_std_init is not None else {})},
                 tensorboard_log=tensorboard_log, device="cpu", verbose=1)
-    if isinstance(cfg.action_scale, str) and log_std_init is None:
-        # Per-joint reach: start every joint with the same exploration in radians as the classic setup
-        # (std 0.37 x 0.5 rad, ~11 deg), not the same in action units (a wide joint would flail).
-        with torch.no_grad():
-            model.policy.log_std.copy_(torch.as_tensor(np.log(np.exp(POLICY_CFG["log_std_init"]) * std_units(probe))))
     return model, env
-
-
-def std_units(env):
-    """Per joint, the action-unit std that moves it as far as std 1 does at the classic 0.5 rad scale
-    (1 for a numeric action scale: noise is set in action units there)."""
-    if not isinstance(env.cfg.action_scale, str):
-        return np.ones(env.nu)
-    return 0.5 / (0.5 * (env.robot.action_up + env.robot.action_down))

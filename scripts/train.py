@@ -26,7 +26,6 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNorm
 from biped_rl.runs import RUNS, check_name, start_record, write_record
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 from biped_rl.training.callbacks import (
-    CriticWarmup,
     CurriculumSnapshot,
     SaveVecNormalize,
     SpeedProbe,
@@ -34,12 +33,12 @@ from biped_rl.training.callbacks import (
     TrainingDashboard,
     VideoRecorder,
 )
-from biped_rl.training.ppo import n_steps_for, new_model, std_units
+from biped_rl.training.ppo import n_steps_for, new_model
 from biped_rl.training.stages import STAGES, apply_stage, load_curriculum, save_curriculum
 
 
 def parse_value(text):
-    """Command-line value: "3" -> 3, "0.5" -> 0.5, "1,2" -> (1, 2), "limits" -> "limits"."""
+    """Command-line value: "3" -> 3, "0.5" -> 0.5, "1,2" -> (1, 2), "abc" -> "abc"."""
     if "," in text:
         return tuple(parse_value(v) for v in text.split(","))
     if text.lstrip("-").isdigit():
@@ -58,12 +57,10 @@ def main():
     p.add_argument("--n-envs", type=int, default=2 * os.cpu_count(),
                    help="simulation workers (default 2 x cores: 36 on this Mac was 43%% faster than 18)")
     p.add_argument("--resume", help="run directory to continue from (fine-tuning / curriculum)")
-    p.add_argument("--critic-warmup", type=int, default=0,
-                   help="steps at the start of a resumed run that train only the critic (a pre-trained actor)")
     p.add_argument("--min-std", type=float, default=0.1,
                    help="with --resume and --stage: raise the policy's exploration noise to at least this "
-                        "(it shrinks during training; a new stage needs room to try new movements). In action units at the "
-                        "classic 0.5 rad scale: 0.1 = ~3 deg, the same in radians with whole-range action scales")
+                        "(it shrinks during training; a new stage needs room to try new movements). In action units: "
+                        "0.1 = ~3 deg at the 0.5 rad action scale")
     p.add_argument("--stage", choices=STAGES, help="training stage (see apply_stage); with --resume for "
                    "all but the first")
     p.add_argument("--video-every", type=int, default=1_000_000, help="steps between walking clips")
@@ -120,10 +117,9 @@ def main():
         raise SystemExit("--env changes what the policy's outputs mean: only for a new run, not with --resume")
     for item in args.env:
         name, value = item.split("=")
-        if name not in ("action_scale", "action_filter", "history", "episode_seconds", "start_poses"):
+        if name not in ("action_scale", "action_filter", "history", "episode_seconds"):
             raise SystemExit(f"unknown or unsupported --env setting: {name}")
-        value = parse_value(value)
-        setattr(cfg, name, (value,) if name == "start_poses" and isinstance(value, str) else value)
+        setattr(cfg, name, parse_value(value))
     (run_dir / "config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
     start_record(run_dir, args)
 
@@ -150,11 +146,9 @@ def main():
         print(f"resumed from {args.resume}, learning rate {model.learning_rate}, "
               f"{args.n_envs} workers x {model.n_steps} steps per update", flush=True)
         if args.stage:
-            # the floor in radians, like the starting noise: in action units 0.1 is already ~11 deg on a
-            # whole-range joint and would reset a converged gait's noise to the start (juan_v8d)
-            floor = np.log(args.min_std * std_units(BipedEnv(cfg.to_dict())))
             with torch.no_grad():
-                model.policy.log_std.copy_(torch.maximum(model.policy.log_std, torch.as_tensor(floor, dtype=torch.float32)))
+                floor = torch.full_like(model.policy.log_std, float(np.log(args.min_std)))
+                model.policy.log_std.copy_(torch.maximum(model.policy.log_std, floor))
         load_curriculum(env, Path(args.resume))
     else:
         actor = [int(n) for n in args.actor.split(",")] if args.actor else None
@@ -173,8 +167,6 @@ def main():
                      best_model_save_path=str(run_dir), log_path=str(run_dir), deterministic=True,
                      callback_on_new_best=SaveVecNormalize(str(run_dir / "best_vecnormalize.pkl"))),
     ]
-    if args.critic_warmup:
-        callbacks.append(CriticWarmup(args.critic_warmup))
     if args.speed_ramp:
         start, end = (float(v) for v in args.speed_ramp.split(","))
         callbacks.append(SpeedRamp(start, end, args.timesteps))

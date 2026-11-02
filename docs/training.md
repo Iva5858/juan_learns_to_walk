@@ -38,7 +38,28 @@ Each stage is its own run that resumes the previous one (`--stage` and `--resume
 | `physics` | randomized, phased in by a difficulty curriculum (0 → 1) | all | none |
 | `pushes` | randomized, full difficulty | all | per-direction curriculum, up to 0.4 m/s |
 
-Fine-tunes start from a `pushes`-stage policy with a lower learning rate (`--lr 1e-4`); [scripts/finetune.sh](../scripts/finetune.sh) is the whole loop (train, export, compare) with the current recipe. `--reward`, `--command`, `--robot` and `--randomization NAME=VALUE` override any setting for a run. Learning to walk from zero on Juan's model has so far ended in standing still; every policy here descends from one first trained on a simpler placeholder biped.
+Fine-tunes start from a `pushes`-stage policy with a lower learning rate (`--lr 1e-4`); [scripts/finetune.sh](../scripts/finetune.sh) is the whole loop: train with the base recipe, export, and judge against the starting policy (walk test with a KEEP / NOT BETTER verdict, standing shove test). `--reward`, `--command`, `--robot` and `--randomization NAME=VALUE` override any setting for a run. Learning to walk from zero on Juan's model has so far ended in standing still (v8, v9: removed in November 2026, see git history); every policy here descends from one first trained on a simpler placeholder biped.
+
+## Fine-tune recipes
+
+Each one is `FROM=<start> STEPS=<n> ./scripts/finetune.sh v7/<name> <options>`, on top of finetune.sh's base recipe. A run's exact command line is in its `run.json` (from v7_21 on).
+
+| Run | From | Steps | Options | Outcome |
+|---|---|---|---|---|
+| v7_13_straight | v7_12b_pushes_best | 30M | (the base recipe) | **safe on the robot**; ~25% of the command |
+| v7_13_scale08 | v7_13_straight | – | `python scripts/rescale_actions.py runs/v7/juan_v7_13_straight runs/v7/juan_v7_13_scale08 --scale 0.8` | same walk, 0.8 rad action range |
+| v7_15d | v7_13_scale08 | 30M | `--randomization push_velocity=0 action_delay_steps=2,4 --command swing_ratio=0.48 swing_height=0.035 --reward tracking_vel=5.0 step_length=4.0 feet_air_time=2.0 swing_lift=2.0 swing_reach=1.0 double_support=1.0 lin_vel_z=0.2 footstep=0.5 gait_mismatch=0.3 foot_slip=4.0 recover_tilt_deg=20` (STEP) | longer steps with real lift |
+| v7_16_backward | v7_15d_best | 30M | STEP + `--command backward_prob=0.25 backward_speed=0.25` (BACK) | forward or backward walking worse |
+| v7_17_speed | v7_15d_best | 30M | STEP + BACK + `--command fast_prob=0.25 fast_speed=0.65 --reward step_length_target=0.15` | kept |
+| v7_18_shoves | v7_17_speed_best | 30M | v7_17's + `--randomization push_velocity=0.3 --reward orientation=4.0 feet_distance=10.0 min_feet_distance=0.09` | forward or backward walking worse |
+| v7_19_topspeed | v7_17_speed_best | 40M | STEP + `--command backward_prob=0.25 backward_speed=0.25 fast_prob=0.4 fast_speed=1.0 speed_limit=1.2 --reward step_length_target=0.18 --speed-ramp 0.4,1.2 --speed-probe-every 2000000` | faster in sim; **on the robot it went diagonal and toppled** |
+| v7_20_stand | v7_19_topspeed_best | 20M | STEP + `--randomization push_velocity=0.8 --command stand_prob=0.35 backward_prob=0.25 backward_speed=0.25 fast_prob=0.15 fast_speed=1.0 speed_limit=1.2 --reward step_length_target=0.18 stand_settle_s=1.0 stand_feet=1.0 --video stand --video-every 2000000` | stands up to shoves; same as v7_19 on the robot |
+| v7_21_steady | v7_13_straight | 30M | `--reward tracking_vel=5.0 tracking_broad_share=0.3 feet_distance=10.0 min_feet_distance=0.09` (STEADY) | **good on the robot**; 18 cm/s at 0.4 m/s |
+| v7_22_straight | v7_21_steady | 20M | STEADY + `--reward heading=3.0 tracking_lat_yaw=2.0 --randomization joint_offset=0.05` | not better (more falls) |
+| v7_23_shoves | v7_21_steady | 30M | v7_22's + `--randomization push_velocity=0.5` | not better |
+| v7_24_speed | v7_21_steady | 150M | STEADY + `--command speed_range=0.0,0.6 fast_prob=0.3 --reward step_length=2.0 step_length_target=0.10` | sim: 0.22 m/s at 0.4+ (v7_21: 0.12), fewer falls |
+
+The 0.8 rad runs (v7_14–v7_20) did well in the simulator and badly on the robot; the 0.5 rad line (v7_13, v7_21, v7_24) is the one that walks.
 
 ## Reading TensorBoard
 
@@ -58,15 +79,15 @@ Walking clips land in `runs/<generation>/<name>/videos/` (layout: [runs.md](runs
 |---|---|
 | `scripts/evaluate.py --run R [--robust -n 50] [--sweep]` | speed, gait, impacts, saturation, smoothness, drift; fall rate under randomization; top speed |
 | `scripts/play.py --run R [--test]` | drive it with the keyboard after the robot's boot sequence; `--test` checks it without a window |
-| `scripts/analysis/straight.py R ...` | forward distance, sideways drift, turning and heading weave at fixed speeds |
-| `scripts/analysis/falls.py R ...` | falls vs hardware-limit stops, with and without shoves, and the direction of the shove before each fall |
+| `scripts/analysis/walk_test.py R ...` | the robot's way of walking (stand at home, take over, walk 8 s) at 0.1–0.6 m/s, calm and with shoves: speed reached, falls and hardware-limit stops, drift, weave, cadence, step length, foot lift; `--verdict` judges runs against the first |
+| `scripts/analysis/stand_pushes.py R ...` | commanded to stand: shoves from 8 directions at growing strength |
 | `scripts/analysis/standing.py NAME` | an exported policy through the robot's own controller: standing lean, offset from home, the jump at take-over |
 | `scripts/analysis/replay.py LOG` | a robot log replayed through the simulator: which servo model matches the real joints |
 | `scripts/analysis/replay_video.py LOG` | a robot log rendered in 3D with its telemetry |
 | `scripts/check_gestures.py` | every gesture on the simulated robot before it may run on the real one |
 | `scripts/check_robot_joints.py` | the robot's joint table still matches the model |
 
-Analysis scripts test on the measured real servos; `--as-trained` uses each run's own.
+Analysis scripts test on the measured real servos (`stand_pushes.py --as-trained`: each run's own).
 
 ## Updating the robot model from Onshape
 
@@ -81,7 +102,7 @@ Analysis scripts test on the measured real servos; `--as-trained` uses each run'
 |---|---|
 | Stands still, never walks (double support → 100%) | Standing is a local optimum: fine-tune from a walking policy instead of training from zero |
 | Falls under randomization but not on nominal physics | Train longer, or phase in the hardest settings (delay, torso mass, push strength) |
-| Weaves or drifts on the robot but not in the sim | The servo model: check with `straight.py` (measured servos) and fit it again from new logs with `replay.py` |
+| Weaves or drifts on the robot but not in the sim | The servo model: check with `walk_test.py` (measured servos) and fit it again from new logs with `replay.py` |
 | Jittery | Raise `action_rate` / `action_acc`; on the robot, check the vibration gauge on the IMU card |
 | `mirror check` fails before training | A sign in `MIRROR_PAIRS` is wrong, or the model is no longer symmetric |
 | Training or loading hangs with no CPU use | iCloud placeholders: move the project out of iCloud |

@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from biped_rl.robots import juan
 from biped_rl.tasks.locomotion import EnvConfig
 from biped_rl.training.stages import STAGES, apply_stage
@@ -16,6 +18,15 @@ def test_removed_settings_are_dropped():
     d["mirror_symmetry"] = True
     d["rewards"]["step_timing"] = 0.0
     assert EnvConfig.from_dict(d) == EnvConfig()
+
+
+def test_removed_features_refuse_runs_that_used_them():
+    d = EnvConfig().to_dict()
+    d["rewards"]["forward_speed"], d["start_poses"] = 0.0, ["home"]  # off: dropped
+    assert EnvConfig.from_dict(d) == EnvConfig()
+    d["rewards"]["forward_speed"] = 2.0  # on: a run that needs the old code
+    with pytest.raises(ValueError, match="forward_speed"):
+        EnvConfig.from_dict(d)
 
 
 def test_shipped_checkpoint_loads():
