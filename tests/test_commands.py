@@ -29,3 +29,13 @@ def test_fast_share_off_draws_the_same_commands_as_before():
     cfg = EnvConfig()
     cfg.command.fast_prob = 0.0
     assert np.array_equal(a, draw(cfg)[1])
+
+
+def test_min_speed_lifts_slow_walking_commands():
+    from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
+    cfg = EnvConfig()
+    cfg.command.min_speed, cfg.command.turn_in_place_prob, cfg.command.stand_prob = 0.15, 0.0, 0.0
+    env = BipedEnv(cfg.to_dict())
+    for seed in range(40):
+        env.reset(seed=seed)
+        assert np.hypot(*env.command.vec[:2]) >= 0.15 - 1e-9

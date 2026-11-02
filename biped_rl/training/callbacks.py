@@ -114,12 +114,35 @@ def end_of_clip(frames, fps):
     return frames + [frames[-1]] * (fps // 2) + fade
 
 
+def clip_commands(cfg, speed_max):
+    """What to film: one clip per kind of command the run trains on, at the speed it trains at now.
+    [(label, (forward, sideways, turn rate))]: "run" for a free run (its one command, or the top forward speed shown), "fwd" at the speed
+    curriculum's top if forward commands are in the mix, "back" at the top backward speed, "side" at the top
+    sideways speed, "turn" at the top turn rate in place; only the kinds with a share in the mix."""
+    c = cfg.command
+    if c.fixed_forward > 0 or cfg.rewards.forward_speed > 0:  # it runs whatever it's shown
+        return [("run", (c.fixed_forward or float(speed_max), 0.0, 0.0))]
+    exclusive = c.turn_in_place_prob + c.backward_prob + c.sideways_prob + c.fast_prob
+    mixed = exclusive < 1.0  # the rest of the commands: forward speeds from [-backward_speed, top]
+    clips = []
+    if speed_max > 0 and (mixed or c.fast_prob > 0):
+        clips.append(("fwd", (float(speed_max), 0.0, 0.0)))
+    if c.backward_speed > 0 and (c.backward_prob > 0 or mixed):
+        clips.append(("back", (-float(c.backward_speed), 0.0, 0.0)))
+    if c.sideways_prob > 0:
+        clips.append(("side", (0.0, float(max(c.lateral_range)), 0.0)))
+    if c.turn_in_place_prob > 0:
+        clips.append(("turn", (0.0, 0.0, float(max(c.yaw_rate_range)))))
+    return clips
+
+
 class VideoRecorder(BaseCallback):
     """Every `freq` steps, film the current policy on the nominal robot (with the shortest servo delay
-    it trains with: policies trained only with delay fall without any): walking forward at the speed
-    curriculum's top, and, if it trains on backward commands, walking backward at its top backward speed.
+    it trains with: policies trained only with delay fall without any), one clip per kind of command it
+    trains on (clip_commands): a free run films its one command, a forward-only stage only forward, a stage
+    with backward / sideways / turn-in-place commands those too, each at the speed trained at the time.
 
-    The forward clip goes to TensorBoard (IMAGES tab, as an animation); both go to <run>/videos/.
+    Clips go to <run>/videos/; with tensorboard=True (train.py --tb-video) the main one also to TensorBoard.
 
     mode="stand" films standing instead (STAND_SCRIPT): stopping from a walk forward and backward, and a
     shove of `shove` m/s from behind, in front and the side while standing; the file name says whether it
@@ -131,23 +154,25 @@ class VideoRecorder(BaseCallback):
                     (6.5, ("walk", -0.15)), (8.0, ("stop",)), (9.5, ("shove", 180)), (11.5, ("shove", 90)),
                     (13.5, ("end",)))
 
-    def __init__(self, cfg, video_dir, freq, seconds=8.0, size=(240, 320), mode="walk", shove=0.4):
+    def __init__(self, cfg, video_dir, freq, seconds=8.0, size=(240, 320), mode="walk", shove=0.4, tensorboard=False):
         super().__init__()
-        self.mode, self.shove = mode, shove
+        self.mode, self.shove, self.tensorboard = mode, shove, tensorboard
         cfg = EnvConfig.from_dict(cfg.to_dict())
+        # the shortest delay it trains with: the nominal robot's in perfect-physics stages
+        rc = cfg.randomization
+        self.delay = int(rc.action_delay_steps[0] if rc.enabled else rc.nominal_delay_steps)
         cfg.randomization.enabled = False
-        self.delay = int(cfg.randomization.action_delay_steps[0])
-        self.backward = cfg.command.backward_speed if cfg.command.backward_prob > 0 else 0.0
         self.env = BipedEnv(cfg, render_mode="rgb_array", height=size[0], width=size[1])
         self.video_dir, self.freq, self.steps = Path(video_dir), freq, int(seconds / self.env.dt)
         self._last = 0
 
-    def _clip(self, forward):
-        """Film one clip at a fixed forward command. Returns (frames, distance walked along +x, seconds)."""
+    def _clip(self, command):
+        """Film one clip at a fixed command (forward, sideways, turn rate). Returns (frames, metres moved
+        forward, metres moved left, degrees turned, seconds), in the start heading's frame."""
         norm = self.model.get_vec_normalize_env()
-        obs, _ = self.env.reset(seed=0, options={"command": (forward, 0.0, 0.0)})
+        obs, _ = self.env.reset(seed=0, options={"command": tuple(command)})
         self.env.servo.action_delay = self.delay
-        start_x = self.env.data.qpos[0]  # nominal physics: the target direction is +x
+        xy0, yaw0 = self.env.data.qpos[:2].copy(), self.env.yaw()  # nominal physics: start heading = +x
         frames = [self.env.render()]
         for i in range(self.steps):
             action, _ = self.model.predict(norm.normalize_obs(obs), deterministic=True)
@@ -156,7 +181,9 @@ class VideoRecorder(BaseCallback):
                 frames.append(self.env.render())
             if terminated or truncated:
                 break
-        return frames, self.env.data.qpos[0] - start_x, (i + 1) * self.env.dt
+        dx, dy = self.env.data.qpos[:2] - xy0
+        turned = np.degrees(np.unwrap([yaw0, self.env.yaw()])[1] - yaw0)
+        return frames, float(dx), float(dy), float(turned), (i + 1) * self.env.dt
 
     def _stand_clip(self):
         """Film STAND_SCRIPT. Returns (frames, seconds until it fell or None, one foot ahead of the other at
@@ -209,24 +236,31 @@ class VideoRecorder(BaseCallback):
             imageio.mimsave(self.video_dir / f"step_{self.num_timesteps // 1000:06d}k_stand_shove{self.shove:.2f}_{outcome}.mp4",
                             frames, fps=fps)
             video = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2).unsqueeze(0)
-            self.logger.record("video/stand", Video(video, fps=fps), exclude=("stdout", "log", "json", "csv"))
+            if self.tensorboard:
+                self.logger.record("video/stand", Video(video, fps=fps), exclude=("stdout", "log", "json", "csv"))
             imageio.mimsave(self.video_dir / "latest.mp4", frames, fps=fps)
             return True
         speed = max(st["speed_max"] for st in self.training_env.env_method("curriculum_state"))
-        frames, distance, seconds = self._clip(speed)
-        frames = end_of_clip(frames, fps)
-        self.logger.record("video/distance_m", distance)
-        self.logger.record("video/mean_speed", distance / seconds)
-        imageio.mimsave(self.video_dir / f"step_{self.num_timesteps // 1000:06d}k_cmd{speed:.2f}_walked{distance:.2f}m.mp4", frames, fps=fps)
-        video = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2).unsqueeze(0)  # (1,T,C,H,W)
-        self.logger.record("video/walk", Video(video, fps=fps), exclude=("stdout", "log", "json", "csv"))
-        imageio.mimsave(self.video_dir / "latest.mp4", frames, fps=fps)
-        if self.backward > 0:
-            frames, distance, seconds = self._clip(-self.backward)
-            self.logger.record("video/backward_distance_m", distance)
-            self.logger.record("video/backward_mean_speed", distance / seconds)
-            imageio.mimsave(self.video_dir / f"step_{self.num_timesteps // 1000:06d}k_back{self.backward:.2f}_walked{distance:.2f}m.mp4",
-                            end_of_clip(frames, fps), fps=fps)
+        for k, (label, command) in enumerate(clip_commands(self.env.cfg, speed)):
+            frames, dx, dy, turned, seconds = self._clip(command)
+            frames = end_of_clip(frames, fps)
+            if label == "side":
+                value, result = command[1], f"moved{dy:+.2f}m_left"
+            elif label == "turn":
+                value, result = command[2], f"turned{turned:+.0f}deg"
+            else:
+                value, result = command[0], f"walked{dx:+.2f}m"
+            self.logger.record(f"video/{label}_forward_m", dx)
+            self.logger.record(f"video/{label}_left_m", dy)
+            self.logger.record(f"video/{label}_turned_deg", turned)
+            self.logger.record(f"video/{label}_seconds_up", seconds)
+            name = f"step_{self.num_timesteps // 1000:06d}k_{label}{abs(value):.2f}_{result}.mp4"
+            imageio.mimsave(self.video_dir / name, frames, fps=fps)
+            if k == 0:
+                imageio.mimsave(self.video_dir / "latest.mp4", frames, fps=fps)
+                if self.tensorboard:  # ~100 MB of event file per 30M-step run; the mp4s are in videos/ either way
+                    video = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2).unsqueeze(0)  # (1,T,C,H,W)
+                    self.logger.record("video/walk", Video(video, fps=fps), exclude=("stdout", "log", "json", "csv"))
         return True
 
 
@@ -244,6 +278,35 @@ class CurriculumSnapshot(BaseCallback):
         self.states = self.training_env.env_method("curriculum_state")
 
     def _on_step(self):
+        return True
+
+
+class CriticWarmup(BaseCallback):
+    """For the first `steps` of a run, train only the value function: the actor (a pre-trained policy,
+    scripts/pretrain_reference.py) keeps its weights and noise while the critic learns what its states are
+    worth, so the first updates don't push it around with a random critic's advantages."""
+
+    def __init__(self, steps):
+        super().__init__()
+        self.steps, self.frozen = steps, []
+
+    def _actor_params(self):
+        pol = self.model.policy
+        return [*pol.mlp_extractor.policy_net.parameters(), *pol.action_net.parameters(), pol.log_std]
+
+    def _on_training_start(self):
+        self.start = self.num_timesteps
+        self.frozen = [p for p in self._actor_params() if p.requires_grad]
+        for p in self.frozen:
+            p.requires_grad_(False)
+        print(f"critic warm-up: actor frozen for {self.steps:,} steps", flush=True)
+
+    def _on_step(self):
+        if self.frozen and self.num_timesteps - self.start >= self.steps:
+            for p in self.frozen:
+                p.requires_grad_(True)
+            self.frozen = []
+            print("critic warm-up done: actor training", flush=True)
         return True
 
 

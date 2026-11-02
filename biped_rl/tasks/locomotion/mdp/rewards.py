@@ -132,15 +132,22 @@ def hip_roll_inward(env, s, w):
     return w.hip_roll_inward * np.sum(np.maximum(-robot.roll_out_sign * s.q[robot.hip_roll_idx], 0.0))
 
 
+def _in_radians(env):
+    """With action_scale "limits", action changes count by the joint motion they cause (relative to the
+    classic 0.5 rad per unit), so a wide-ranging joint isn't free to jerk; with a number, in action units
+    as always (fine-tunes keep the weights they were tuned with)."""
+    return env.robot.action_radians if isinstance(env.cfg.action_scale, str) else 1.0
+
+
 def action_rate(env, s, w):
     """First difference of the actions."""
-    return w.action_rate * np.mean((s.action - env.episode.last_action) ** 2)
+    return w.action_rate * np.mean(_in_radians(env) * (s.action - env.episode.last_action) ** 2)
 
 
 def action_acc(env, s, w):
     """Second difference of the actions (jerk)."""
     ep = env.episode
-    return w.action_acc * np.mean((s.action - 2 * ep.last_action + ep.last_action2) ** 2)
+    return w.action_acc * np.mean(_in_radians(env) * (s.action - 2 * ep.last_action + ep.last_action2) ** 2)
 
 
 def joint_acc(env, s, w):
@@ -248,7 +255,10 @@ def stand_pose(env, s, w):
     Microduck's pose reward does the same, tight at zero command."""
     if not env.command.standing:
         return 0.0
-    return w.stand_pose * float(np.mean((s.q - env.robot.home_joint) ** 2))
+    crouches = [env.robot.home_joint]
+    if "knees_back" in env.cfg.start_poses:  # standing with the knees bent backwards is as good
+        crouches.append(env.robot.poses["knees_back"])
+    return w.stand_pose * min(float(np.mean((s.q - c) ** 2)) for c in crouches)
 
 
 def stand_feet(env, s, w):
@@ -278,8 +288,42 @@ PENALTY_TERMS = (path_offset, orientation, ang_vel_xy, lin_vel_z, base_height, k
 # Free while recovering (1 s after a shove, the torso tilted beyond recover_tilt_deg, or stand_settle_s after
 # a stop): otherwise they punish the quick extra step that catches a fall or squares the feet. A threshold the robot can lean past all the time is a
 # loophole: juan_v7_15c leaned 9.4 deg (66% of steps past 8) to switch them off.
+# With gait_floor > 0 (exploration, scripts/from_scratch.sh): the rhythm terms pay that share even when the
+# speed is wrong (stepping beats standing still, in the spirit of Siekmann et al. 2021's periodic rewards), and
+# the progress terms pay in full: they reward feet moving the way the command asks, so they can't be earned
+# marching in place. Paying the rhythm terms in full made marching in place the best deal (juan_v8 trials:
+# 1.6 per step for rhythm against 0.2-0.3 for actually moving).
+RHYTHM_TERMS = ("gait_contact", "feet_clearance", "feet_air_time", "swing_lift")
+PROGRESS_TERMS = ("step_length", "swing_reach")
+# Penalties that keep full weight whatever penalty_scale says: the servo-gear protections, and stand_still
+# (not moving when told to walk): scaled down with the rest, standing and shuffling in place won (juan_v8n).
+SAFETY_PENALTIES = ("servo_overload", "backdrive", "joint_limits", "stand_still")
 PAUSED_WHILE_RECOVERING = ("symmetry", "gait_mismatch", "footstep", "reversals", "stand_pose", "stand_feet",
                            "double_support")
+
+
+def knee_bend(env, s, w):
+    """Knees bent the chosen way (knee_bend_dir), in full from the home crouch's angle on (bending further is
+    never less: deeper knees absorb landings), mean of both knees."""
+    crouch = w.knee_bend_dir * env.robot.home_joint[env.robot.knee_idx]
+    return w.knee_bend * float(np.mean(np.clip(s.q[env.robot.knee_idx] / crouch, 0.0, 1.0)))
+
+
+def imitation(env, s, w):
+    """How closely the joints follow the reference gait now (mdp/reference.py): 1 on it, falling off with
+    the mean squared joint-angle error over imitation_sigma_deg^2 (DeepMimic's pose reward)."""
+    from biped_rl.tasks.locomotion.mdp import reference
+    err = s.q - reference.pose_now(env)
+    return w.imitation * float(np.exp(-np.mean(err ** 2) / np.radians(w.imitation_sigma_deg) ** 2))
+
+
+def short_step(env, s, w):
+    """At each touchdown, minus the share of the fastest planned swing the foot was not lifted (<= 0)."""
+    if not s.new_td.any():
+        return 0.0
+    c = env.cfg.command
+    shortest = c.swing_ratio * c.gait_period_fast
+    return -w.short_step * float(np.sum(1 - np.clip(s.air_at_touchdown[s.new_td] / shortest, 0.0, 1.0)))
 
 
 def compute(env, s):
@@ -297,8 +341,23 @@ def compute(env, s):
     env.episode.speed_err_sum += np.sqrt(err2)
 
     task = {f.__name__: f(env, s, w) for f in TASK_TERMS}
-    task = {k: s.tracking * v for k, v in task.items()}
+    if w.gait_floor > 0:  # exploration: rhythm pays a floor share regardless of speed, progress pays in full
+        rhythm = w.gait_floor + (1 - w.gait_floor) * s.tracking
+        task = {k: v if k in PROGRESS_TERMS else rhythm * v if k in RHYTHM_TERMS else s.tracking * v
+                for k, v in task.items()}
+    else:
+        task = {k: s.tracking * v for k, v in task.items()}
+    if w.forward_speed:  # free run: as fast as it can along its start heading, whatever the command
+        task["forward_speed"] = w.forward_speed * float(np.clip(s.run_vx, -w.forward_speed_cap, w.forward_speed_cap))
+    if w.knee_bend:
+        task["knee_bend"] = knee_bend(env, s, w)
+    if w.short_step:
+        task["short_step"] = short_step(env, s, w)
+    if w.imitation:
+        task["imitation"] = imitation(env, s, w)
     pen = {f.__name__: f(env, s, w) for f in PENALTY_TERMS}
+    if w.penalty_scale != 1.0:
+        pen = {k: v if k in SAFETY_PENALTIES else w.penalty_scale * v for k, v in pen.items()}
     s.recovering = (env.episode.t - env.episode.last_push < 1.0) or np.linalg.norm(s.grav[:2]) > np.sin(np.radians(w.recover_tilt_deg))
     s.recovering |= env.command.standing and env.episode.t - env.command.stand_since < w.stand_settle_s
     if s.recovering:

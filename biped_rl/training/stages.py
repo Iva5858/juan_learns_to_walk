@@ -67,6 +67,9 @@ def load_curriculum(env, run_dir):
     path = run_dir / "curriculum.json"
     if path.exists():
         state = json.loads(path.read_text())
+        cfg = run_dir / "config.json"
+        if cfg.exists() and not json.loads(cfg.read_text())["randomization"].get("physics_curriculum", False):
+            state["difficulty"] = None  # it never had the curriculum: start the physics stage easy, not at its 1.0
         env.env_method("set_curriculum_state", state)
         restored = env.env_method("curriculum_state")[0]
         print(f"curriculum from {path}: {restored}", flush=True)

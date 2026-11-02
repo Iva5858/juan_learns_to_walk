@@ -3,7 +3,7 @@ own; biped_rl/training/stages.py carries them over between runs (curriculum.json
 
 * speed: the top of the forward-speed command grows while the top commands are tracked through
   whole, safe episodes (CommandConfig.speed_range .. speed_limit).
-* physics difficulty: scales the hardest randomization, 0 -> 1 (RandomizationConfig.physics_curriculum).
+* physics difficulty: scales all the randomization, 0 (the nominal robot) -> 1 (RandomizationConfig.physics_curriculum).
 * push strength: per push direction relative to the robot (RandomizationConfig.push_curriculum).
 """
 import numpy as np
@@ -17,9 +17,12 @@ def state(env):
 
 def set_state(env, state):
     cur = env.curriculum
-    cur.speed_max = float(state["speed_max"])
+    # never below this run's speed_range: a fine-tune that raises it would otherwise keep the old top
+    cur.speed_max = max(float(state["speed_max"]), env.cfg.command.speed_range[1])
     cur.push_level = np.array(state["push_level"], dtype=float)
-    if env.cfg.randomization.physics_curriculum:  # otherwise the robot stays at full difficulty
+    # otherwise the robot stays at full difficulty; and a run without the curriculum saved 1.0 (its fixed
+    # level), which would start the physics stage at full strength (juan_v8j): None keeps difficulty_start
+    if env.cfg.randomization.physics_curriculum and state.get("difficulty") is not None:
         cur.difficulty = float(state["difficulty"])
 
 

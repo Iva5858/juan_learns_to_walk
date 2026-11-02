@@ -21,8 +21,8 @@ def read_sensors(env):
     per-episode bias and noise), and servo angles (with a calibration offset, the servo's 0.24 deg
     resolution and noise) and speeds."""
     d, c, rng, robot = env.data, env.cfg.randomization, env.np_random, env.robot
-    noisy = c.enabled
-    noise = lambda scale, n: rng.normal(0, scale, n) if noisy else 0.0
+    noisy, k = c.enabled, env.curriculum.difficulty  # noise grows with the physics difficulty
+    noise = lambda scale, n: rng.normal(0, k * scale, n) if noisy and k > 0 else 0.0
     q = d.qpos[robot.qpos_idx] - env.servo.joint_offset  # what a miscalibrated servo reports
     if noisy and c.joint_resolution > 0:
         q = np.round(q / c.joint_resolution) * c.joint_resolution
@@ -66,7 +66,8 @@ def compute(env):
     """The full observation: [actor part | privileged part]."""
     d, cmd, ep, robot, rc = env.data, env.command, env.episode, env.robot, env.cfg.randomization
     ph = 2 * np.pi * commands.phase(env)
-    yaw_err = commands.heading_error(env) + (env.np_random.normal(0, rc.noise_yaw) if rc.enabled else 0.0)
+    k = env.curriculum.difficulty
+    yaw_err = commands.heading_error(env) + (env.np_random.normal(0, k * rc.noise_yaw) if rc.enabled and k > 0 else 0.0)
     clock = [0.0, 0.0] if cmd.standing else [np.sin(ph), np.cos(ph)]  # stopped clock = stand
     actor = np.concatenate([*history_frames(env), cmd.vec, clock, [np.sin(yaw_err), np.cos(yaw_err)]])
     privileged = np.concatenate([

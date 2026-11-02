@@ -45,6 +45,10 @@ class CommandConfig:
     fast_prob: float = 0.0                  # only walk forward fast: the top quarter of the speed range
                                             # (otherwise fast commands are rare); 0 = off
     straight_prob: float = 0.3              # of the remaining commands: no sideways or turn part
+    fixed_forward: float = 0.0              # m/s: every command is this, straight ahead (the free-run playground,
+                                            # where the reward is speed itself); 0 = off
+    min_speed: float = 0.0                  # m/s: walking commands slower than this are raised to it (same
+                                            # direction), so none of them is "barely move"; 0 = off
     resample_interval: tuple = (2.0, 8.0)   # s between new commands within an episode
     # Forward speed: the top of the range grows (speed curriculum) while the robot tracks its top
     # commands through whole, safe episodes, up to speed_limit: the sim finds the real top speed.
@@ -57,6 +61,9 @@ class CommandConfig:
     gait_period_fast: float = 0.45          # s per cycle at fast_speed and above
     fast_speed: float = 0.8                 # m/s
     swing_ratio: float = 0.45               # fraction of the cycle each foot is in the air (< 0.5: double support)
+    # The gait clock runs at the reference gait's rhythm (mdp/reference.py cadence), so the clock the policy
+    # sees, the footfall rewards and the reference poses all share one cycle. Use with swing_ratio 0.5.
+    reference_gait: bool = False
     swing_height: float = 0.025             # target sole clearance during swing [m]
 
 
@@ -88,10 +95,40 @@ class RewardWeights:
     step_length_target: float = 0.12        # ...up to this far [m] (speed = step length x cadence)
     feet_air_time: float = 0.0              # foot stays up for the swing the gait clock plans (no early taps)
     lift_height: float = 0.01               # m: a foot counts as stepping only above this (not skimming the floor)
+    # Lower steps count in proportion to their height (5 mm = half) for step length and air time, instead of
+    # not at all: juan_v8j's 8 steps/s shuffle lifted under 1 cm in 84-100% of its steps, so step_length paid
+    # nothing whatever their length and short_step fined every step in full, whatever its duration.
+    lift_partial: bool = False
     # Dense versions (0 = off; juan_v7_15c on): they pay for every bit of progress, so training can
     # find its way out of a shuffle (the touchdown terms above pay nothing until a full step happens).
     swing_lift: float = 0.0                 # swing foot's height, linear up to swing_height
     swing_reach: float = 0.0                # swing foot moving in the commanded direction while lifted
+    # From-zero exploration (scripts/from_scratch.sh): gait_floor > 0 pays the rhythm terms that share without
+    # the speed being right and the progress terms in full (mdp/rewards.py RHYTHM_TERMS, PROGRESS_TERMS); 0 = all
+    # task terms x tracking. Every penalty but the servo-protection ones x penalty_scale.
+    gait_floor: float = 0.0
+    # Free run (scripts/from_scratch.sh playground): speed along the start heading [m/s, signed, capped] x this,
+    # added outside the tracking gate: walking as fast as it can is the task, there is no command to follow.
+    # Measured over each whole control step (distance moved), so no instant lunge can be timed. 0 = off.
+    forward_speed: float = 0.0
+    forward_speed_cap: float = 1.5
+    # Knees bent while it moves, in a chosen direction: x this from the home crouch's knee angle on (+1 = knees
+    # forward, the home pose; -1 = knees backward, the knees_back pose), less linearly down to 0 at straight
+    # legs; bending further is never less. Outside the tracking gate, like forward_speed. 0 = off.
+    knee_bend: float = 0.0
+    # Imitation of the reference gait (mdp/reference.py, needs command.reference_gait): exp(-mean squared
+    # joint-angle error / imitation_sigma_deg^2) x this, outside the tracking gate (the style, at any speed).
+    imitation: float = 0.0
+    imitation_sigma_deg: float = 10.0
+    imitation_terminate_deg: float = 0.0   # end the episode (as a fall) beyond this rms error from the reference; 0 = off
+    knee_bend_dir: float = -1.0
+    # Short steps cost: at each touchdown, x the share of the gait clock's fastest planned swing (command
+    # swing_ratio x gait_period_fast, 0.2 s) the foot was NOT lifted above lift_height (0 for a full swing,
+    # -1 x this for a foot that never left the floor). Outside the tracking gate, like forward_speed: speed
+    # bought with cadence costs, from steps faster than the robot's own gait design (juan_v8e/h: 10 steps/s
+    # shuffles). 0 = off.
+    short_step: float = 0.0
+    penalty_scale: float = 1.0
     # --- survival ---
     alive: float = 0.2                      # small: survival alone must not be worth standing still for
     termination: float = -10.0              # once, on a fall or a hardware limit
@@ -155,7 +192,8 @@ class RandomizationConfig:
     """What differs from episode to episode (enabled=False: the nominal robot, no noise, no pushes)."""
     enabled: bool = True
     # --- world ---
-    friction: tuple = (0.5, 1.2)            # rubber soles: ~0.6-1.0 indoors; lower for dusty or polished floors
+    friction: tuple = (0.35, 0.8)           # TPU 95A soles on ceramic tile (estimate, nominal 0.55 in
+                                            # scripts/model/postprocess_onshape.py): dusty to clean and matte
     floor_tilt_deg: float = 3.0             # slope, as tilted gravity
     # --- body. Each part x mass_scale, then the whole robot x total_mass_scale, then the torso (battery,
     # Pi, wiring: a heavy, high torso is the hard case) x torso_mass_scale. The CAD model is 1.75 kg;
@@ -181,6 +219,10 @@ class RandomizationConfig:
     # (EnvConfig.use_measured_servos).
     latency: tuple = (0.005, 0.019)         # s
     action_delay_steps: tuple = (1, 2)
+    # The delay of the nominal robot (randomization off: the perfect-physics stages). 0 lets a policy use servos
+    # that react instantly: juan_v8's free run found a 9.5 steps/s shuffle the real servos (3-4 steps late)
+    # could never drive.
+    nominal_delay_steps: int = 0
     obs_delay_steps: tuple = (0, 1)         # IMU and joint readings are this many steps old
     # --- IMU. Errors that stay the same through an episode (accelerometer offset and mounting, gyro
     # zero-rate offset) matter more than its white noise.
@@ -232,7 +274,7 @@ class RandomizationConfig:
 
 # Settings that saved run configs may still carry, all at the value the current code behaves as;
 # dropped when loading.
-REMOVED = {"mirror_symmetry", "robot.joint_feedback", "command.mode", "rewards.flight", "rewards.step_timing",
+REMOVED = {"rewards.gate_gait", "mirror_symmetry", "robot.joint_feedback", "command.mode", "rewards.flight", "rewards.step_timing",
            "rewards.posture_symmetry", "randomization.voltage_coupled", "randomization.servo_speed"}
 
 
@@ -243,7 +285,13 @@ class EnvConfig:
     rewards: RewardWeights = field(default_factory=RewardWeights)
     randomization: RandomizationConfig = field(default_factory=RandomizationConfig)
     control_hz: float = 50.0     # policy rate
-    action_scale: float = 0.5    # rad of servo target offset from the home pose per unit action
+    # rad of servo target offset from the home pose per unit action, or "limits": each joint's own range
+    # (+1 = its upper limit, -1 its lower; robot/policy.py action_reach)
+    action_scale: float = 0.5
+    # Poses an episode can start from, one drawn per episode: "home" (the crouch), "knees_back" (the same
+    # crouch with the knees bent backwards), "straight" (legs straight). Anything but ("home",) also lets
+    # the stand-still pose be either crouch.
+    start_poses: tuple = ("home",)
     action_filter: float = 0.5   # EMA on the actions (1 = off); the robot uses the same filter
     history: int = 3             # past sensor frames stacked into the observation
     episode_seconds: float = 20.0
@@ -262,7 +310,7 @@ class EnvConfig:
         d = {k: v for k, v in d.items() if k not in REMOVED}
         for k in nested:
             d[k] = {kk: v for kk, v in d.get(k, {}).items() if f"{k}.{kk}" not in REMOVED}
-        return cls(**{k: nested[k](**{kk: tup(v) for kk, v in d[k].items()}) if k in nested else v
+        return cls(**{k: nested[k](**{kk: tup(v) for kk, v in d[k].items()}) if k in nested else tup(v)
                       for k, v in d.items()})
 
     @classmethod

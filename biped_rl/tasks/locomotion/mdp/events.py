@@ -8,7 +8,8 @@ from biped_rl.tasks.locomotion.mdp import curriculums
 
 
 def set_nominal_physics(env):
-    """The model's own masses, frictions and servo numbers, no delays, no sensor biases."""
+    """The model's own masses, frictions and servo numbers, no sensor biases, and the servo delay
+    RandomizationConfig.nominal_delay_steps (0 by default: none)."""
     m, n, r = env.model, env.robot.nominal, env.cfg.robot
     m.body_mass[:], m.body_inertia[:], m.body_ipos[:] = n["mass"], n["inertia"], n["ipos"]
     m.geom_friction[:] = n["friction"]
@@ -20,7 +21,7 @@ def set_nominal_physics(env):
     sv.kp = np.full(nu, r.kp)
     sv.kd = np.full(nu, r.kd)
     sv.latency_steps = 0
-    sv.action_delay = sv.obs_delay = 0
+    sv.action_delay, sv.obs_delay = int(env.cfg.randomization.nominal_delay_steps), 0
     sv.backlash = np.zeros(nu)
     sv.joint_offset = np.zeros(nu)
     env.domain.friction_scale = 1.0
@@ -30,32 +31,36 @@ def set_nominal_physics(env):
 
 
 def randomize_physics(env):
-    """Masses, friction, floor slope, servo strength, speed, gains and delays, sensor biases."""
+    """Masses, friction, floor slope, servo strength, speed, gains and delays, sensor biases. Every range
+    is scaled by the physics-curriculum difficulty k: 0 = the nominal robot (set_nominal_physics but the
+    lowest delays), 1 = the full ranges. (Only the hardest used to be: the rest arriving at full strength
+    at once, juan_v8j's physics stage fell in 65% of its episodes at difficulty 0.)"""
     m, n, c, rng = env.model, env.robot.nominal, env.cfg.randomization, env.np_random
     nu, di, root, sv = env.nu, env.robot.dof_idx, env.robot.root, env.servo
-    scale = rng.uniform(*c.mass_scale, size=m.nbody)
+    k = env.curriculum.difficulty
+    upto = lambda span: (span[0], span[0] + k * (span[1] - span[0]))  # from its easy end
+    around = lambda span, mid: (mid + k * (span[0] - mid), mid + k * (span[1] - mid))  # from nominal
+    scale = rng.uniform(*around(c.mass_scale, 1.0), size=m.nbody)
     m.body_mass[:] = n["mass"] * scale
     m.body_inertia[:] = n["inertia"] * scale[:, None]
-    m.body_ipos[root] = n["ipos"][root] + rng.uniform(-c.com_offset, c.com_offset, 3)
-    env.domain.friction_scale = rng.uniform(*c.friction) / n["friction"][:, 0].max()
+    m.body_ipos[root] = n["ipos"][root] + rng.uniform(-k * c.com_offset, k * c.com_offset, 3)
+    f0 = n["friction"][:, 0].max()
+    env.domain.friction_scale = rng.uniform(*around(c.friction, f0)) / f0
     m.geom_friction[:, 0] = n["friction"][:, 0] * env.domain.friction_scale
-    m.dof_armature[di] = n["armature"][di] * rng.uniform(*c.armature_scale, size=nu)
-    m.dof_frictionloss[di] = n["frictionloss"][di] * rng.uniform(*c.frictionloss_scale, size=nu)
-    tilt, heading = np.deg2rad(rng.uniform(0, c.floor_tilt_deg)), rng.uniform(0, 2 * np.pi)
+    m.dof_armature[di] = n["armature"][di] * rng.uniform(*around(c.armature_scale, 1.0), size=nu)
+    m.dof_frictionloss[di] = n["frictionloss"][di] * rng.uniform(*around(c.frictionloss_scale, 1.0), size=nu)
+    tilt, heading = np.deg2rad(rng.uniform(0, k * c.floor_tilt_deg)), rng.uniform(0, 2 * np.pi)
     g = np.linalg.norm(n["gravity"])
     m.opt.gravity[:] = g * np.array([np.sin(tilt) * np.cos(heading),
                                      np.sin(tilt) * np.sin(heading), -np.cos(tilt)])
     r = env.cfg.robot
-    volt = rng.uniform(*c.servo_strength)  # one battery voltage: torque and speed rise and fall together
-    sv.stall = r.stall_torque * volt * rng.uniform(0.95, 1.05, nu)
-    sv.speed = r.no_load_speed * volt * rng.uniform(0.95, 1.05, nu)
-    sv.kp = r.kp * rng.uniform(*c.kp_scale, size=nu)
-    sv.kd = r.kd * rng.uniform(*c.kd_scale, size=nu)
-    lat = int(rng.uniform(*c.latency) / m.opt.timestep)
+    volt = rng.uniform(*around(c.servo_strength, 1.0))  # one battery: torque and speed rise and fall together
+    sv.stall = r.stall_torque * volt * rng.uniform(*around((0.95, 1.05), 1.0), nu)
+    sv.speed = r.no_load_speed * volt * rng.uniform(*around((0.95, 1.05), 1.0), nu)
+    sv.kp = r.kp * rng.uniform(*around(c.kp_scale, 1.0), size=nu)
+    sv.kd = r.kd * rng.uniform(*around(c.kd_scale, 1.0), size=nu)
+    lat = int(rng.uniform(k * c.latency[0], k * c.latency[1]) / m.opt.timestep)
     sv.latency_steps = min(lat, env.frame_skip - 1)
-    # The hardest randomization below is scaled by the physics-curriculum difficulty (1 = the full ranges).
-    k = env.curriculum.difficulty
-    upto = lambda span: (span[0], span[0] + k * (span[1] - span[0]))
     extra = np.full(m.nbody, rng.uniform(*upto(c.total_mass_scale)))
     extra[root] *= rng.uniform(*upto(c.torso_mass_scale))
     m.body_mass[:] *= extra
@@ -81,12 +86,13 @@ def vary_start_state(env):
     """Start from a perturbed crouch, already moving (as in Berkeley Humanoid Lite): joint angles =
     home x a per-joint scale, plus a torso velocity. Then the robot is put back on the floor."""
     c, d, rng, robot = env.cfg.randomization, env.data, env.np_random, env.robot
-    qi = robot.qpos_idx
+    qi, k = robot.qpos_idx, env.curriculum.difficulty  # all scaled by the physics difficulty, like randomize_physics
     noise = d.qpos[qi] - robot.home_joint
-    d.qpos[qi] = np.clip(robot.home_joint * rng.uniform(*c.reset_joint_scale, env.nu) + noise,
+    lo, hi = c.reset_joint_scale
+    d.qpos[qi] = np.clip(robot.home_joint * rng.uniform(1 + k * (lo - 1), 1 + k * (hi - 1), env.nu) + noise,
                          robot.joint_lo, robot.joint_hi)
-    d.qvel[0:2] += rng.uniform(-c.reset_lin_vel, c.reset_lin_vel, 2)
-    d.qvel[3:6] += rng.uniform(-c.reset_ang_vel, c.reset_ang_vel, 3)
+    d.qvel[0:2] += rng.uniform(-k * c.reset_lin_vel, k * c.reset_lin_vel, 2)
+    d.qvel[3:6] += rng.uniform(-k * c.reset_ang_vel, k * c.reset_ang_vel, 3)
     mujoco.mj_forward(env.model, d)
     env.ground()
 

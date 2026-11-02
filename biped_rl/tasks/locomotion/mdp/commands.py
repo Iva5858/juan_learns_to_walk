@@ -29,6 +29,10 @@ def sample(env):
     [-backward_speed, top of the speed curriculum]; a share of commands is straight walking, and
     share each only turns, only walks backward, or only walks sideways."""
     c, rng, cmd = env.cfg.command, env.np_random, env.command
+    if c.fixed_forward > 0:
+        cmd.standing, cmd.vec = False, np.array([c.fixed_forward, 0.0, 0.0])
+        cmd.max_forward = max(cmd.max_forward, cmd.forward)
+        return
     was_standing = cmd.standing
     cmd.standing = bool(rng.uniform() < c.stand_prob)
     if cmd.standing and not was_standing and hasattr(env, "episode"):
@@ -55,6 +59,10 @@ def sample(env):
         else:
             vy, wz = rng.uniform(*c.lateral_range), rng.uniform(*c.yaw_rate_range)
         cmd.vec = np.array([vx, vy, wz])
+    if c.min_speed > 0 and not cmd.standing and kind != 0:  # every walking command asks for real travel
+        speed = np.hypot(cmd.vec[0], cmd.vec[1])
+        direction = cmd.vec[:2] / speed if speed > 1e-6 else np.array([1.0, 0.0])
+        cmd.vec[:2] = direction * max(speed, c.min_speed)
     cmd.max_forward = max(cmd.max_forward, cmd.forward)
 
 
@@ -79,6 +87,9 @@ def set_command(env, forward, sideways=0.0, turn_rate=0.0):
 def gait_period(env):
     """Faster rhythm at higher commands: a fixed rhythm caps top speed."""
     c, vec = env.cfg.command, env.command.vec
+    if c.reference_gait:
+        from biped_rl.tasks.locomotion.mdp import reference
+        return 2.0 / reference.cadence(vec)
     frac = min(np.hypot(vec[0], vec[1]) / c.fast_speed, 1.0)
     return c.gait_period - (c.gait_period - c.gait_period_fast) * frac
 
