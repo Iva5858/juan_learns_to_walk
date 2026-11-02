@@ -19,12 +19,12 @@ COUNTS_PER_DEG = 1000 / 240
 # Ranges and home must match juan/rl_robot.xml (checked by scripts/check_robot_joints.py).
 JOINTS = (
     ("left_hip_roll", 1, -26.0, 19.0, 0.0, "leg outward"),
-    ("left_hip_pitch", 2, -117.0, 69.0, -22.92, "leg back"),
-    ("left_knee", 3, -81.0, 117.0, 45.84, "knee bends"),
+    ("left_hip_pitch", 2, -112.0, 104.0, -22.92, "leg back"),
+    ("left_knee", 3, -106.0, 110.0, 45.84, "knee bends"),
     ("left_ankle", 4, -78.0, 79.0, -22.92, "toes down"),
     ("right_hip_roll", 5, -19.0, 26.0, 0.0, "leg inward"),
-    ("right_hip_pitch", 6, -117.0, 69.0, -22.92, "leg back"),
-    ("right_knee", 7, -81.0, 117.0, 45.84, "knee bends"),
+    ("right_hip_pitch", 6, -112.0, 104.0, -22.92, "leg back"),
+    ("right_knee", 7, -106.0, 110.0, 45.84, "knee bends"),
     ("right_ankle", 8, -78.0, 79.0, -22.92, "toes down"),
 )
 NAMES = tuple(j[0] for j in JOINTS)

@@ -83,7 +83,7 @@ LEG_CAPSULES = {"left_thigh_link": "left_shin_link", "left_shin_link": "left_foo
 ROLL_INWARD_DEG, ROLL_OUTWARD_DEG = 26.0, 19.0
 # Pitch-joint ranges (deg, training conventions): the robot's measured ranges minus a 5 deg margin,
 # the narrower of the two legs (the policy is mirror-symmetric).
-PITCH_RANGE_DEG = {"hip_pitch": (-117.0, 69.0), "knee": (-81.0, 117.0), "ankle": (-78.0, 79.0)}
+PITCH_RANGE_DEG = {"hip_pitch": (-112.0, 104.0), "knee": (-106.0, 110.0), "ankle": (-78.0, 79.0)}
 HOME = {"hip_roll": 0.0, "hip_pitch": -0.4, "knee": 0.8, "ankle": -0.4}  # rad, training conventions
 
 

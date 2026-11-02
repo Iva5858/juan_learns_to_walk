@@ -24,12 +24,17 @@ fi
 
 echo "=== 1/3 code: $BRANCH on $PI:$DIR"
 ssh "$PI" "set -e; cd $DIR
-    cp robot/calibration.json /tmp/juan_calibration.json 2>/dev/null || true   # the Pi's own, put back below
+    # The Pi's own calibration: kept in ~/juan_calibration/ (one copy per deploy, never overwritten) and
+    # put back whatever happens, a failed pull included
+    mkdir -p ~/juan_calibration; CAL=~/juan_calibration/calibration_\$(date +%Y%m%d_%H%M%S).json
+    [ -f robot/calibration.json ] && cp robot/calibration.json \$CAL
+    trap '[ -f \$CAL ] && cp \$CAL robot/calibration.json' EXIT
     git checkout -q -- robot/calibration.json 2>/dev/null || rm -f robot/calibration.json   # out of git's way
+    git checkout -q -- robot/policies/ 2>/dev/null || true   # the Pi's copies: step 2 copies this computer's over them
     git fetch --prune -q
     git checkout -q $BRANCH 2>/dev/null || git checkout -q -b $BRANCH origin/$BRANCH
     git pull -q --ff-only
-    [ -f /tmp/juan_calibration.json ] && cp /tmp/juan_calibration.json robot/calibration.json
+    [ -f \$CAL ] && cp \$CAL robot/calibration.json
     echo \"   now at \$(git log --oneline -1)\"
     git status --short robot/calibration.json | sed 's/^/   (the Pi keeps its own calibration) /'"
 
