@@ -30,7 +30,8 @@ ssh "$PI" "set -e; cd $DIR
     [ -f robot/calibration.json ] && cp robot/calibration.json \$CAL
     trap '[ -f \$CAL ] && cp \$CAL robot/calibration.json' EXIT
     git checkout -q -- robot/calibration.json 2>/dev/null || rm -f robot/calibration.json   # out of git's way
-    git checkout -q -- robot/policies/ 2>/dev/null || true   # the Pi's copies: step 2 copies this computer's over them
+    git checkout -q -- robot/policies/ 2>/dev/null || true   # the Pi's copies, changed or not in git:
+    git clean -fq -- 'robot/policies/*.npz'                   # step 2 copies this computer's over them
     git fetch --prune -q
     git checkout -q $BRANCH 2>/dev/null || git checkout -q -b $BRANCH origin/$BRANCH
     git pull -q --ff-only

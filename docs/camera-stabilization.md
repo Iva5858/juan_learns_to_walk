@@ -12,16 +12,18 @@ Install Raspberry Pi OS packages `python3-opencv`, `python3-numpy`, and
 
 ## Calibration and first run
 
-1. Stop dashboard camera streaming. Capture at least 15 varied checkerboard views:
-   `python scripts/calibrate_camera.py /tmp/juan-camera-views --capture 20`.
-   Move the board through different distances, tilts, and image corners. The
-   default board has 9 by 6 **inner** corners; change `--columns` and `--rows` to match.
+1. Stop the dashboard (it holds the camera). Capture at least 15 varied checkerboard views:
+   `python3 -m robot.calibrate_camera ~/juan-camera-views --capture 30`. While it runs,
+   `http://<pi-name>.local:8000` shows the camera live, with the board's corners drawn when it is
+   found; a view is saved only then. Move the board through different distances, tilts, and image
+   corners. The default board has 9 by 6 **inner** corners (10 by 7 squares); change `--columns`
+   and `--rows` to match.
 2. Measure the camera-to-torso rotation from the rigid mount/CAD. Camera coordinates
    are right, down, forward; torso coordinates are forward, left, up, after the
    IMU's configured axis remapping. The three columns of `camera_to_body` are
    the camera's right, down, and forward unit vectors expressed in torso axes.
    This must be a proper rotation, not a reflection. No mounting orientation is assumed.
-3. Run `python scripts/calibrate_camera.py /tmp/juan-camera-views --camera-to-body`
+3. Run `python3 -m robot.calibrate_camera ~/juan-camera-views --camera-to-body`
    followed by the nine measured matrix entries in row-major order. This writes
    `robot/camera_calibration.json` and prints reprojection error. Inspect the error
    and held-out checkerboards before trusting the calibration. Do not change lens,
