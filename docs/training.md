@@ -50,7 +50,7 @@ Fine-tunes start from a `pushes`-stage policy with a lower learning rate (`--lr 
 | `4_gait` | What does the walk look like? | double support well below 90% (near 100% = standing still) |
 | `5_rewards`, `6_penalties` | Why? | grouped sums; `--log-details` adds every single penalty |
 
-Walking clips land in `runs/<name>/videos/` every 1M steps. `best_model.zip` is the best evaluation during training (randomized robot, 0.3 m/s shoves).
+Walking clips land in `runs/<generation>/<name>/videos/` (layout: [runs.md](runs.md)) every 1M steps. `best_model.zip` is the best evaluation during training (randomized robot, 0.3 m/s shoves).
 
 ## Tools
 

@@ -5,15 +5,16 @@
 #   v7_18  shoves:   pushes back on, less sway, wider foot spacing
 # Each stage starts from the previous stage's best policy, unless that stage made forward or backward
 # walking worse (scripts/analysis/speeds.py); then the next stage starts from the last good one.
-# All stages share v7_15d's stepping recipe. Results: runs/overnight_report.txt.
+# All stages share v7_15d's stepping recipe. Results: runs/logs/v7/overnight_report.txt.
 #
-#   ./scripts/overnight.sh 2>&1 | tee runs/overnight.log        # ~4 h on an 18-core Mac
+#   ./scripts/overnight.sh 2>&1 | tee runs/logs/v7/overnight.log        # ~4 h on an 18-core Mac
 #   FROM=runs/other STEPS=20000000 ./scripts/overnight.sh      # another start or stage length
 set -euo pipefail
 cd "$(dirname "$0")/.."
-FROM=${FROM:-runs/juan_v7_15d_best}
+mkdir -p runs/logs/v7
+FROM=${FROM:-runs/v7/juan_v7_15d_best}
 STEPS=${STEPS:-30000000}
-REPORT=runs/overnight_report.txt
+REPORT=runs/logs/v7/overnight_report.txt
 TOLERANCE=${TOLERANCE:-0.05}   # a stage may lose at most 5 points of forward or backward share
 
 BASE=(--randomization push_velocity=0 action_delay_steps=2,4
@@ -42,20 +43,20 @@ stage() {  # name, extra train.py options...
     local name=$1; shift
     echo "=== $(date +%H:%M) stage $name from $FROM" | tee -a "$REPORT"
     FROM="$FROM" STEPS="$STEPS" ./scripts/finetune.sh "$name" "${BASE[@]}" "$@"
-    cat "runs/${name}_report.txt" >> "$REPORT"
-    speeds "runs/${name}_best" "runs/${name}_speeds.json"
-    if [[ $(pick "$PREV_JSON" "runs/${name}_speeds.json") == keep ]]; then
+    cat "runs/logs/${name}_report.txt" >> "$REPORT"
+    speeds "runs/${name}_best" "runs/logs/${name}_speeds.json"
+    if [[ $(pick "$PREV_JSON" "runs/logs/${name}_speeds.json") == keep ]]; then
         echo "=== $name kept: the next stage starts from it" | tee -a "$REPORT"
-        FROM="runs/${name}_best"; PREV_JSON="runs/${name}_speeds.json"
+        FROM="runs/${name}_best"; PREV_JSON="runs/logs/${name}_speeds.json"
     else
         echo "=== $name made forward or backward walking worse: the next stage starts from $FROM again" | tee -a "$REPORT"
     fi
 }
 
 echo "Overnight run from $FROM, $STEPS steps per stage ($(date))" > "$REPORT"
-PREV_JSON=runs/overnight_start_speeds.json
+PREV_JSON=runs/logs/v7/overnight_start_speeds.json
 speeds "$FROM" "$PREV_JSON"
-stage juan_v7_16_backward "${BACKWARD[@]}"
-stage juan_v7_17_speed "${BACKWARD[@]}" "${SPEED[@]}"
-stage juan_v7_18_shoves "${BACKWARD[@]}" "${SPEED[@]}" "${SHOVES[@]}"
+stage v7/juan_v7_16_backward "${BACKWARD[@]}"
+stage v7/juan_v7_17_speed "${BACKWARD[@]}" "${SPEED[@]}"
+stage v7/juan_v7_18_shoves "${BACKWARD[@]}" "${SPEED[@]}" "${SHOVES[@]}"
 echo "=== $(date +%H:%M) done. Best policy: $FROM (exported in robot/policies/)" | tee -a "$REPORT"

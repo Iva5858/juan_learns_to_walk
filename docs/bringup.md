@@ -117,7 +117,7 @@ polarity at the first servo of each cable chain.
 
 ## 9. Walking (policy on the robot)
 
-Before: `python scripts/export_policy.py runs/juan_v7_8_best` on the computer (already done for
+Before: `python scripts/export_policy.py runs/v7/juan_v7_8_best` on the computer (already done for
 v7_8_best: `robot/policies/juan_v7_8_best.npz`), then `git pull` on the Pi.
 
 | # | Test | Expect |

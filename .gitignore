@@ -26,3 +26,5 @@ research_notes/
 
 # Speech recognition models (downloaded, see robot/voice_commands.py)
 robot/models/
+
+new_parts

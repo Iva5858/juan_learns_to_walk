@@ -4,7 +4,7 @@ measured real servos (EnvConfig.use_measured_servos), no shoves, 10 s per episod
 For each command: the speed reached along the commanded direction (and as a share of the command),
 falls, torso lean, how often both feet are on the ground, and how high the feet lift.
 
-    python scripts/analysis/speeds.py checkpoints/juan_v7_13_straight runs/juan_v7_16_best
+    python scripts/analysis/speeds.py checkpoints/juan_v7_13_straight runs/v7/juan_v7_16_best
     python scripts/analysis/speeds.py runs/a --json out/a_speeds.json     # also save the numbers
     python scripts/analysis/speeds.py runs/a --fast                       # also 0.6-1.2 m/s commands
 """

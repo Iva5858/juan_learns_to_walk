@@ -4,15 +4,16 @@
 # heading and turn-rate rewards up and more straight commands (juan_v7_13), a 4x body-weight landing
 # limit, and speed-curriculum safety limits these servos can actually meet (juan_v7_14).
 #
-#   ./scripts/finetune.sh my_run                                  # ~50 min for 30M steps on an 18-core Mac
-#   FROM=runs/other STEPS=10000000 ./scripts/finetune.sh my_run --reward heading=3.0   # extra train.py options
+# REPORTS=0 skips the comparison at the end (~15 min per run). A run name is <generation>/<name> (docs/runs.md): the run goes to runs/v7/juan_v7_21, its report to runs/logs/v7/.
+#   ./scripts/finetune.sh v7/juan_v7_21                           # ~50 min for 30M steps on an 18-core Mac
+#   FROM=runs/v7/other STEPS=10000000 ./scripts/finetune.sh v7/juan_v7_21 --reward heading=3.0   # extra train.py options
 #
 # juan_v7_14 (faster, larger joint range): first give v7_13 the 0.8 rad range, then fine-tune it:
-#   python scripts/rescale_actions.py runs/juan_v7_13_straight runs/juan_v7_13_scale08 --scale 0.8
-#   FROM=runs/juan_v7_13_scale08 ./scripts/finetune.sh juan_v7_14
+#   python scripts/rescale_actions.py runs/v7/juan_v7_13_straight runs/v7/juan_v7_13_scale08 --scale 0.8
+#   FROM=runs/v7/juan_v7_13_scale08 ./scripts/finetune.sh v7/juan_v7_14
 #
 # juan_v7_15 (longer strides, quicker rhythm, no shoves while it learns to go faster):
-#   FROM=runs/juan_v7_13_scale08 ./scripts/finetune.sh juan_v7_15 \
+#   FROM=runs/v7/juan_v7_13_scale08 ./scripts/finetune.sh v7/juan_v7_15 \
 #     --randomization push_velocity=0 action_delay_steps=2,4 \
 #     --command fast_speed=0.5 swing_ratio=0.48 swing_height=0.035 \
 #     --reward tracking_vel=5.0 step_length=4.0 feet_air_time=2.0 lin_vel_z=0.2 footstep=0.5 gait_mismatch=0.3
@@ -20,7 +21,7 @@
 #   ... (as v7_15) ... feet_clearance=2.0 foot_slip=4.0
 # juan_v7_15c: dense stepping rewards (lift and reach pay for every bit of progress), a penalty for keeping
 # both feet down when one should swing, and the original rhythm (more speed has to come from longer steps):
-#   FROM=runs/juan_v7_13_scale08 STEPS=5000000 ./scripts/finetune.sh juan_v7_15c_test \
+#   FROM=runs/v7/juan_v7_13_scale08 STEPS=5000000 ./scripts/finetune.sh v7/juan_v7_15c_test \
 #     --randomization push_velocity=0 action_delay_steps=2,4 \
 #     --command swing_ratio=0.48 swing_height=0.035 \
 #     --reward tracking_vel=5.0 step_length=4.0 feet_air_time=2.0 swing_lift=2.0 swing_reach=1.0 double_support=1.0 \
@@ -28,7 +29,7 @@
 # juan_v7_15d: the same, with gait penalties paused only after a shove or a real stumble (tilt over 20 deg),
 # not a constant lean: add recover_tilt_deg=20
 # juan_v7_20_stand (standing: stronger shoves from every side, stopping from a walk with the feet square):
-#   FROM=runs/juan_v7_19_topspeed_best STEPS=20000000 ./scripts/finetune.sh juan_v7_20_stand \
+#   FROM=runs/v7/juan_v7_19_topspeed_best STEPS=20000000 ./scripts/finetune.sh v7/juan_v7_20_stand \
 #     --randomization push_velocity=0.8 action_delay_steps=2,4 \
 #     --command stand_prob=0.35 swing_ratio=0.48 swing_height=0.035 backward_prob=0.25 backward_speed=0.25 \
 #               fast_prob=0.15 fast_speed=1.0 speed_limit=1.2 \
@@ -36,11 +37,12 @@
 #     --video stand --video-every 2000000
 set -euo pipefail
 cd "$(dirname "$0")/.."
-NAME=${1:?usage: scripts/finetune.sh <run name> [train.py options]}
+NAME=${1:?usage: scripts/finetune.sh <generation>/<run name> [train.py options]}
 shift
 FROM=${FROM:-checkpoints/juan_v7_12b_pushes_best}
 STEPS=${STEPS:-30000000}
-REPORT=runs/${NAME}_report.txt
+REPORT=runs/logs/${NAME}_report.txt
+mkdir -p "$(dirname "$REPORT")"
 
 echo "=== $(date +%H:%M) 1/3 train runs/$NAME from $FROM"
 python scripts/train.py --run-name "$NAME" --stage pushes --resume "$FROM" --timesteps "$STEPS" --lr 1e-4 \
@@ -61,6 +63,9 @@ for run in "runs/$NAME" "runs/${NAME}_best"; do
     if python scripts/export_policy.py "$run"; then exported+=("$run"); else echo "   ($run not exported: it failed the check)"; fi
 done
 
+if [[ ${REPORTS:-1} == 0 ]]; then   # REPORTS=0: a pipeline judging the runs its own way (scripts/steady.sh)
+    echo "=== $(date +%H:%M) done (no comparison: REPORTS=0)"; exit 0
+fi
 echo "=== $(date +%H:%M) 3/3 compare on the measured servos -> $REPORT"
 {
     echo "Straight walking (10 s, no pushes; swing = heading weave, peak to peak):"

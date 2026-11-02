@@ -11,7 +11,7 @@ behaving exactly like the old one and can then learn to use the extra range:
   * the smoothness penalties on action changes (action_rate, action_acc) are scaled by (new/old)^2,
     so the same motion in radians costs the same.
 
-    python scripts/rescale_actions.py runs/juan_v7_13_straight runs/juan_v7_13_scale08 --scale 0.8
+    python scripts/rescale_actions.py runs/v7/juan_v7_13_straight runs/v7/juan_v7_13_scale08 --scale 0.8
 """
 import argparse
 import json

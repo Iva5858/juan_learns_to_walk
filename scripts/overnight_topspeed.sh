@@ -2,21 +2,22 @@
 # A fourth overnight stage, to find Juan's top speed: waits until scripts/overnight.sh has finished, then
 # fine-tunes its best policy while the top speed command ramps from 0.4 to 1.2 m/s over the run
 # (--speed-ramp), and every 2M steps measures the speed actually reached at 0.2-1.2 m/s commands
-# (--speed-probe-every, runs/juan_v7_19_topspeed/speed_probe.csv). Where the reached speed stops rising
-# while the ramp keeps going is the limit. Report: runs/topspeed_report.txt.
+# (--speed-probe-every, runs/v7/juan_v7_19_topspeed/speed_probe.csv). Where the reached speed stops rising
+# while the ramp keeps going is the limit. Report: runs/logs/v7/topspeed_report.txt.
 #
-#   ./scripts/overnight_topspeed.sh 2>&1 | tee runs/topspeed.log       # start any time: it waits
+#   ./scripts/overnight_topspeed.sh 2>&1 | tee runs/logs/v7/topspeed.log       # start any time: it waits
 set -euo pipefail
 cd "$(dirname "$0")/.."
+mkdir -p runs/logs/v7
 STEPS=${STEPS:-40000000}
-NAME=juan_v7_19_topspeed
-REPORT=runs/topspeed_report.txt
+NAME=v7/juan_v7_19_topspeed
+REPORT=runs/logs/v7/topspeed_report.txt
 
 while pgrep -f "scripts/overnight.sh" >/dev/null; do
     sleep 60
 done
-FROM=${FROM:-$(sed -n 's/.*Best policy: \([^ ]*\).*/\1/p' runs/overnight_report.txt | tail -1)}
-[[ -d "$FROM" ]] || { echo "no best policy found in runs/overnight_report.txt (set FROM=...)" >&2; exit 1; }
+FROM=${FROM:-$(sed -n 's/.*Best policy: \([^ ]*\).*/\1/p' runs/logs/v7/overnight_report.txt | tail -1)}
+[[ -d "$FROM" ]] || { echo "no best policy found in runs/logs/v7/overnight_report.txt (set FROM=...)" >&2; exit 1; }
 
 echo "=== $(date +%H:%M) top speed: $NAME from $FROM ($STEPS steps)" | tee "$REPORT"
 FROM="$FROM" STEPS="$STEPS" ./scripts/finetune.sh "$NAME" \
@@ -27,7 +28,7 @@ FROM="$FROM" STEPS="$STEPS" ./scripts/finetune.sh "$NAME" \
              swing_reach=1.0 double_support=1.0 lin_vel_z=0.2 footstep=0.5 gait_mismatch=0.3 foot_slip=4.0 \
              recover_tilt_deg=20 \
     --speed-ramp 0.4,1.2 --speed-probe-every 2000000
-cat "runs/${NAME}_report.txt" >> "$REPORT"
+cat "runs/logs/${NAME}_report.txt" >> "$REPORT"
 echo "Speed reached during training (top command ramping 0.4 -> 1.2 m/s; randomized robots, no shoves):" | tee -a "$REPORT"
 python - "runs/$NAME/speed_probe.csv" <<'EOF' | tee -a "$REPORT"
 import csv, sys

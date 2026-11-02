@@ -5,7 +5,7 @@ feet may be staggered; the shove comes 1 s after the stop. Also how far the join
 nobody pushes and how far one foot stays ahead of the other. Randomized robots at full difficulty, the same seeds
 for every policy; by default on the measured real servos.
 
-    python scripts/analysis/stand_pushes.py runs/juan_v7_19_topspeed_best runs/juan_v7_20_stand_best
+    python scripts/analysis/stand_pushes.py runs/v7/juan_v7_19_topspeed_best runs/v7/juan_v7_20_stand_best
 """
 import argparse
 from pathlib import Path

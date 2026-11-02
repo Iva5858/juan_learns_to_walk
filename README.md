@@ -2,6 +2,8 @@
 
 Reinforcement learning for **Juan**, a 43 cm, 8-servo biped. The policy is trained in MuJoCo with PPO and runs on the real robot's Raspberry Pi, steered from a web dashboard.
 
+> **Note:** this is a personal research project, developed in the open and changing often: the `dev` branch is work in progress, and results and policies are tested only on this one robot. Running a policy on other hardware is at your own risk. Issues and questions are welcome, but there is no support. Code under Apache 2.0, robot design and policies under CC BY-NC 4.0 (see [NOTICE](NOTICE)).
+
 **Status (October 2026):** Juan walks on the real robot at up to 0.2 m/s, turns, side-steps and survives light shoves.
 
 | Policy | Status | On the robot |
@@ -40,12 +42,12 @@ python scripts/analysis/straight.py checkpoints/juan_v7_12b_pushes_best    # dri
 python scripts/analysis/falls.py checkpoints/juan_v7_12b_pushes_best       # falls with and without shoves
 
 # fine-tune it, export it for the robot and compare it with the start: ~1 h on an 18-core Mac
-./scripts/finetune.sh my_run                   # extra options go to train.py, e.g. --reward heading=3.0
+./scripts/finetune.sh v7/juan_v7_21_my_run    # extra options go to train.py, e.g. --reward heading=3.0
 tensorboard --logdir runs                      # charts while it trains (see docs/training.md)
-# -> robot/policies/my_run.npz (checked step by step against the simulator) and runs/my_run_report.txt
+# -> robot/policies/juan_v7_21_my_run.npz (checked step by step against the simulator), runs/logs/v7/juan_v7_21_my_run_report.txt
 ```
 
-`checkpoints/` holds the training state (network, normalization, curricula, config) of the two safe policies, so you can fine-tune from them. Training outputs go to `runs/<name>/` (not in git). Run everything from the project folder, and keep the project out of iCloud-synced folders: iCloud turns checkpoints into placeholders that hang training.
+`checkpoints/` holds the training state (network, normalization, curricula, config) of the two safe policies, so you can fine-tune from them. Training outputs go to `runs/<generation>/<name>/` (not in git; layout, names and the run index: [docs/runs.md](docs/runs.md)). Run everything from the project folder, and keep the project out of iCloud-synced folders: iCloud turns checkpoints into placeholders that hang training.
 
 ---
 
@@ -64,8 +66,8 @@ biped_rl/robots/juan.py ───▶ biped_rl/tasks/locomotion/ ◀────�
             scripts/train.py + biped_rl/training/ (PPO, stages, TensorBoard)
                                    │
                                    ▼
-          runs/<name>/ ──▶ scripts/evaluate.py, play.py, analysis/
-                       ──▶ scripts/export_policy.py ──▶ robot/policies/*.npz ──▶ robot/ (on the Pi)
+          runs/<gen>/<name>/ ──▶ scripts/evaluate.py, play.py, analysis/
+                            ──▶ scripts/export_policy.py ──▶ robot/policies/*.npz ──▶ robot/ (on the Pi)
 ```
 
 The layout follows Berkeley Humanoid Lite [[1]](#references): a robot description, a task made of small term modules, a training package and thin scripts. The training recipe follows Li et al. [[2]](#references).
