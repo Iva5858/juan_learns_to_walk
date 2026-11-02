@@ -18,14 +18,14 @@ COUNTS_PER_DEG = 1000 / 240
 # name, servo ID, simulator joint range (deg), home pose (deg), what + means.
 # Ranges and home must match juan/rl_robot.xml (checked by scripts/check_robot_joints.py).
 JOINTS = (
-    ("left_hip_roll", 1, -7.0, 25.0, 0.0, "leg outward"),
-    ("left_hip_pitch", 2, -110.0, 68.0, -22.92, "leg back"),
-    ("left_knee", 3, -40.0, 114.0, 45.84, "knee bends"),
-    ("left_ankle", 4, -74.0, 72.0, -22.92, "toes down"),
-    ("right_hip_roll", 5, -25.0, 7.0, 0.0, "leg inward"),
-    ("right_hip_pitch", 6, -110.0, 68.0, -22.92, "leg back"),
-    ("right_knee", 7, -40.0, 114.0, 45.84, "knee bends"),
-    ("right_ankle", 8, -74.0, 72.0, -22.92, "toes down"),
+    ("left_hip_roll", 1, -26.0, 19.0, 0.0, "leg outward"),
+    ("left_hip_pitch", 2, -117.0, 69.0, -22.92, "leg back"),
+    ("left_knee", 3, -81.0, 117.0, 45.84, "knee bends"),
+    ("left_ankle", 4, -78.0, 79.0, -22.92, "toes down"),
+    ("right_hip_roll", 5, -19.0, 26.0, 0.0, "leg inward"),
+    ("right_hip_pitch", 6, -117.0, 69.0, -22.92, "leg back"),
+    ("right_knee", 7, -81.0, 117.0, 45.84, "knee bends"),
+    ("right_ankle", 8, -78.0, 79.0, -22.92, "toes down"),
 )
 NAMES = tuple(j[0] for j in JOINTS)
 BY_NAME = {j[0]: j for j in JOINTS}

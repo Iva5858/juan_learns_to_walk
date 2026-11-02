@@ -5,7 +5,7 @@
 Re-run after every `onshape-to-robot juan`; the original robot.xml / scene.xml are never modified.
 
 What it does:
-  * masses from the pitch-deck BoM (never Onshape's material properties): every part gets its
+  * masses from the BoM (MASS_RULES; never Onshape's material properties): every part gets its
     BoM mass, MuJoCo computes each part's inertia from its mesh, links are summed from parts
   * joint conventions = the training conventions (torso frame x forward, y left, z up):
     roll joints rotate about +x, pitch joints (hip pitch, knee, ankle) about +y. So hip pitch
@@ -13,7 +13,7 @@ What it does:
   * hip roll range: 7 deg inward / 25 deg outward on both legs (direction measured on the model);
     hip pitch, knee and ankle ranges: PITCH_RANGE_DEG (the robot's measured ranges, minus a margin)
   * removes any coupling between joints (Onshape gear relations) and gives all 8 joints a servo
-  * foot soles = flat boxes + rubber pads (stable contact instead of mesh hulls), capsules on
+  * foot soles = the rolled TPU soles (a convex rocker, stable contact instead of mesh hulls), capsules on
     thighs and shins (legs cannot pass through each other; knee on the floor = a fall)
   * IMU site, home keyframe (crouched, feet flat, just touching the floor)
 """
@@ -29,39 +29,45 @@ import numpy as np
 # --------------------------------------------------------------------------- BoM (grams)
 # (regex on the part name, grams, "each" = per matching part | "total" = split over all matches)
 MASS_RULES = [
-    # printed parts (PLA)
-    (r"^1[ab]_hip_", 113 / 4, "each"),
-    (r"^2[ab]_thigh_", 135 / 4, "each"),
-    (r"^3[ab]_shin_", 131 / 4, "each"),
-    (r"^4_ankle_foot", 64 / 2, "each"),
-    (r"^5_pelvis", 191, "each"),
-    (r"^6_battery_door", 14, "each"),
-    (r"^7_head_tray", 44, "each"),
-    (r"^8_head_shelf", 36, "each"),
-    (r"^9_head_cover", 94, "each"),
+    # BoM v3 (2026-10-30): printed parts are slicer estimates at the print settings (4 walls, 25 % infill for
+    # the legs and feet, 20 % pelvis, 15 % head); the legs are the generative-design parts (new_parts/).
+    # The robot comes out ~1.88 kg with the lattice head cover (the old pitch-deck BoM gave 1.75 kg on another basis).
+    (r"^1a_hip_", 29.1, "each"),
+    (r"^1b_hip_", 33.76, "each"),
+    (r"^2a_thigh_", 25.22, "each"),
+    (r"^2b_thigh_", 30.85, "each"),
+    (r"^3a_shin_", 24.64, "each"),
+    (r"^3b_shin_", 30.16, "each"),
+    (r"^4_ankle_foot", 46.46, "each"),        # + the rolled TPU sole (25 g) as the sole: --pad-mass
+    (r"^5_pelvis", 300.35, "each"),
+    (r"^6_battery_door", 18.0, "each"),
+    (r"^7_head_tray", 57.53, "each"),
+    (r"^8_head_shelf", 47.12, "each"),
+    (r"^9_head_cover", 46, "each"),        # the lattice cover: 41.7 cm3 x ~1.1 g/cm3 (thin members print
+                                          # near solid, as the generative legs do), an estimate; solid: 112.47
     (r"^debug_board_holder", 7, "each"),
-    # electronics: HTD-35H "servo with horns" 64 g = body 58 g + 2 horns x 3 g (split is an estimate)
-    (r"^htd_35h_servo_body", 58, "each"),
-    (r"^htd_35h_horn", 3, "each"),
-    (r"^battery_3s_2200", 176, "each"),
-    (r"^battery_3s_650", 59, "each"),
+    # electronics: HTD-35H 64 g (datasheet) + 2 aluminium horns x 1.95 g
+    (r"^htd_35h_servo_body", 64, "each"),
+    (r"^htd_35h_horn", 1.95, "each"),
+    (r"^battery_3s_2200", 168.5, "each"),     # less its leads and plug (counted with the cables)
+    (r"^battery_3s_650", 55.69, "each"),
     (r"^raspberry_pi_4", 47, "each"),
-    (r"^pi_camera_v2", 4, "each"),
+    (r"^pi_camera_v2", 3, "each"),
     (r"^lm2596_regulator", 11, "total"),
     (r"^adafruit_bno055_imu", 3, "total"),
     # debug board (BusLinker) and its components
     (r"^(circuit_board_40_x|chip|capacitor_100_uf|screw_terminal|serial_port|usb_socket|vin_jumper"
      r"|servo_socket_[ab])", 8, "total"),
-    # servo leads (BoM: 8 leads, 23 g), split over every lead segment in the CAD
-    (r"^(servo_bus_lead|lead__|lead_in_from|trunk_lead)", 23, "total"),
-    # power and data cables + plugs (BoM: 42 g)
+    # servo leads with their plugs (BoM v3: 13.1 g), split over every lead segment in the CAD
+    (r"^(servo_bus_lead|lead__|lead_in_from|trunk_lead)", 13.1, "total"),
+    # power and data cables + plugs (BoM v3: 37.2 g)
     (r"^(camera_ribbon|imu_wires|motor_battery_leads|pi_battery_leads|usb_c_power_cable|usb_cable__"
-     r"|usb_a_plug|usb_c_plug|usb_plug_at|xt30_pair|xt60_pair|servo_plug_[ab])", 42, "total"),
-    # fasteners (BoM totals / counts)
-    (r"^m2_heat_set_insert", 7 / 55, "each"),
-    (r"^m2_x_8_socket_head_screw", 14 / 52, "each"),
-    (r"^m2_x_12_socket_head_screw", 1 / 3, "each"),
-    (r"^m2_x_5_horn_screw", 10 / 64, "each"),
+     r"|usb_a_plug|usb_c_plug|usb_plug_at|xt30_pair|xt60_pair|servo_plug_[ab])", 37.2, "total"),
+    # fasteners (BoM v3, each)
+    (r"^m2_heat_set_insert", 0.12, "each"),
+    (r"^m2_x_8_socket_head_screw", 0.27, "each"),
+    (r"^m2_x_12_socket_head_screw", 0.35, "each"),
+    (r"^m2_x_5_horn_screw", 0.15, "each"),
 ]
 # Thin / hollow parts: mass on the surface ("shell"); dense parts: solid convex hull ("convex")
 SHELL_PARTS = (r"^(\d[ab]?_|debug_board_holder|circuit_board|lead|servo_bus_lead|trunk_lead|camera_ribbon|imu_wires|"
@@ -74,10 +80,10 @@ ACTUATOR_ORDER = ("left_hip_roll", "left_hip_pitch", "left_knee", "left_ankle",
 FEET = ("left_foot_link", "right_foot_link")
 LEG_CAPSULES = {"left_thigh_link": "left_shin_link", "left_shin_link": "left_foot_link",
                 "right_thigh_link": "right_shin_link", "right_shin_link": "right_foot_link"}
-ROLL_INWARD_DEG, ROLL_OUTWARD_DEG = 7.0, 25.0
+ROLL_INWARD_DEG, ROLL_OUTWARD_DEG = 26.0, 19.0
 # Pitch-joint ranges (deg, training conventions): the robot's measured ranges minus a 5 deg margin,
 # the narrower of the two legs (the policy is mirror-symmetric).
-PITCH_RANGE_DEG = {"hip_pitch": (-110.0, 68.0), "knee": (-40.0, 114.0), "ankle": (-74.0, 72.0)}
+PITCH_RANGE_DEG = {"hip_pitch": (-117.0, 69.0), "knee": (-81.0, 117.0), "ankle": (-78.0, 79.0)}
 HOME = {"hip_roll": 0.0, "hip_pitch": -0.4, "knee": 0.8, "ankle": -0.4}  # rad, training conventions
 
 
@@ -137,9 +143,19 @@ def sole_bottom(model, data, foot):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("export_dir", type=Path)
-    ap.add_argument("--pad-thickness", type=float, default=0.002, help="rubber sole pad [m]")
-    ap.add_argument("--pad-mass", type=float, default=0.0, help="per foot [g]")
-    ap.add_argument("--friction", type=float, default=0.8)
+    # The rolled TPU sole (4s_sole_v4_rolled_TPU): 6 mm under the foot, 113 x 68 mm overall (4 mm past the
+    # printed foot at the heel, 5 mm at the toe), flat on the ground over 91 x 46 mm, the edge rolling up
+    # 6.5 mm over its last 11 mm all around; 34.9 cm3 of TPU, ~25 g at 20 % infill
+    ap.add_argument("--pad-thickness", type=float, default=0.006, help="sole under the foot's flat middle [m]")
+    ap.add_argument("--pad-mass", type=float, default=25.0, help="per foot [g]")
+    ap.add_argument("--sole-heel", type=float, default=0.004, help="sole past the printed foot at the heel [m]")
+    ap.add_argument("--sole-toe", type=float, default=0.005, help="sole past the printed foot at the toe [m]")
+    ap.add_argument("--sole-width", type=float, default=0.068, help="sole's overall width [m]")
+    ap.add_argument("--roll-width", type=float, default=0.011, help="rolled edge, measured inward [m]")
+    ap.add_argument("--roll-rise", type=float, default=0.0065, help="how far the edge curves up [m]")
+    ap.add_argument("--friction", type=float, default=0.55,
+                    help="sole on the floor: TPU 95A on glazed ceramic tile (an estimate; measure it: tan of the "
+                         "angle a tilted tile lets the sole slide at)")
     args = ap.parse_args()
     src, out = args.export_dir / "robot.xml", args.export_dir / "rl_robot.xml"
     tree = parse(src)
@@ -238,11 +254,23 @@ def main():
         verts = np.vstack(verts)
         z0 = verts[:, 2].min()
         sole = verts[verts[:, 2] < z0 + 0.003]
-        # Pad = the foot's own outline (2D hull of the sole region), extruded by the pad thickness
-        # below the CAD sole, plus 1 mm overlap into the sole so the pad is attached.
+        # Sole = the foot's own outline (2D hull of the sole region), stretched to the sole's length and width
+        # (heel -x, toe +x in the export frame), pad_thickness below the CAD sole in the flat middle, its edge
+        # rolling up roll_rise over the outer roll_width (rings of a parabola), the top 1 mm into the foot so it
+        # is attached. MuJoCo collides with its convex hull: a rocker, flat in the middle.
         outline = convex_hull_2d(sole[:, :2])
-        t = args.pad_thickness
-        prism_w = np.vstack([np.column_stack([outline, np.full(len(outline), z)]) for z in (z0 - t, z0 + 0.001)])
+        lo, hi = outline.min(0), outline.max(0)
+        mid_y, half_w = (lo[1] + hi[1]) / 2, args.sole_width / 2
+        new_lo, new_hi = np.array([lo[0] - args.sole_heel, mid_y - half_w]), np.array([hi[0] + args.sole_toe, mid_y + half_w])
+        outer = new_lo + (outline - lo) / (hi - lo) * (new_hi - new_lo)
+        centre, t = (new_lo + new_hi) / 2, args.pad_thickness
+        rings = [np.column_stack([outer, np.full(len(outer), z0 + 0.001)])]
+        for s in np.linspace(1.0, 0.0, 6):  # 1 = the outer edge, 0 = where the flat starts
+            inset = (1 - s) * args.roll_width
+            scale = 1 - 2 * inset / (new_hi - new_lo)
+            ring = centre + (outer - centre) * scale
+            rings.append(np.column_stack([ring, np.full(len(ring), z0 - t + args.roll_rise * s ** 2)]))
+        prism_w = np.vstack(rings)
         prism_local = (prism_w - x) @ R  # world -> foot body frame
         fb = bodies[foot]
         for g in [g for g in fb.findall("geom") if g.get("class") == "collision"]:
@@ -252,9 +280,10 @@ def main():
         ET.SubElement(fb, "geom", name=f"{foot}_sole", type="mesh", mesh=f"{foot}_pad",
                       friction=f"{args.friction} 0.005 0.0001", mass=f"{max(args.pad_mass, 1e-3) / 1000:.6g}",
                       rgba="0.12 0.12 0.12 1")
-        ext = outline.max(0) - outline.min(0)
-        report.append(f"{foot}: rubber pad following the foot outline ({len(outline)} points, "
-                      f"{1000 * ext[0]:.0f} x {1000 * ext[1]:.0f} mm), {1000 * t:.1f} mm thick, friction {args.friction}")
+        ext, flat = new_hi - new_lo, new_hi - new_lo - 2 * args.roll_width
+        report.append(f"{foot}: rolled TPU sole {1000 * ext[0]:.0f} x {1000 * ext[1]:.0f} mm, flat {1000 * flat[0]:.0f} x "
+                      f"{1000 * flat[1]:.0f} mm, {1000 * t:.1f} mm under the foot, edge up {1000 * args.roll_rise:.1f} mm, "
+                      f"{args.pad_mass:g} g, friction {args.friction}")
     radii = {}
     for link, child in LEG_CAPSULES.items():
         bid, cid = model.body(link).id, model.body(child).id
@@ -330,7 +359,7 @@ def main():
     for b in range(1, model.nbody):
         print(f"{model.body(b).name:<18}{1000 * model.body_mass[b]:>8.1f}")
     total = model.body_subtreemass[1]
-    print(f"{'TOTAL':<18}{1000 * total:>8.1f}   (deck BoM: ~1747 g + pads)")
+    print(f"{'TOTAL':<18}{1000 * total:>8.1f}   (BoM v3 with the rolled TPU soles and the lattice cover)")
     straight = mujoco.MjData(model)
     straight.qpos[:] = model.qpos0
     mujoco.mj_forward(model, straight)
