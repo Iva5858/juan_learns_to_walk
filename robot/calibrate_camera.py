@@ -22,6 +22,16 @@ PAGE = b"""<!doctype html><meta name=viewport content="width=device-width"><titl
 <body style="margin:0;background:#111;display:flex;justify-content:center"><img src="/stream.mjpg" style="max-width:100%">"""
 
 
+class DualStackServer(ThreadingHTTPServer):
+    """IPv4 and IPv6, so http://name.local:8000 works either way (as the dashboard's)."""
+    address_family = socket.AF_INET6
+    daemon_threads = True
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+
 def find_board(cv2, image, size, fast=False):
     """The checkerboard's inner corners in a BGR image (refined to sub-pixel), or None."""
     grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -82,8 +92,11 @@ def capture(cv2, folder, count, size):
         def log_message(self, *args):
             pass
 
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    server.daemon_threads = True
+    try:
+        server = DualStackServer(("::", PORT), Handler)
+    except OSError:
+        raise SystemExit(f"Port {PORT} is busy: stop the dashboard first (pkill -f robot.dashboard); "
+                         "it also holds the camera") from None
     threading.Thread(target=server.serve_forever, daemon=True).start()
     with Picamera2() as camera:
         camera.configure(camera.create_video_configuration(main={"size": SIZE, "format": "RGB888"},
