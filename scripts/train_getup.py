@@ -3,6 +3,8 @@
     python scripts/train_getup.py --run-name getup/juan_getup_1                  # 30M steps, ~1 h
     python scripts/train_getup.py --run-name getup/juan_getup_2 --weights standing=5.0
     python scripts/train_getup.py --run-name getup/juan_getup_2 --resume runs/getup/juan_getup_1 --weights feet_only=1.0
+    python scripts/train_getup.py --run-name getup/juan_getup_9 --resume runs/getup/juan_getup_8_best \
+        --physics-from runs/v7/juan_v7_13_straight --start side_deg=90 joint_rad=0.5 any_heading=1
 
 Every --video-every steps it films the current policy getting up (one episode: the start never varies) to
 runs/getup/<name>/videos/: step_<k>_stood<seconds>.mp4 and latest.mp4, the seconds it stood on its feet
@@ -27,7 +29,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import biped_rl  # noqa: E402,F401  (registers BipedGetUp-v0)
 from biped_rl.runs import RUNS, check_name, start_record, write_record  # noqa: E402
-from biped_rl.tasks.getup import GetUpEnv, GetUpWeights, config  # noqa: E402
+from biped_rl.tasks.getup import GetUpEnv, GetUpStart, GetUpWeights, config  # noqa: E402
 from biped_rl.training.ppo import n_steps_for, new_model  # noqa: E402
 
 
@@ -55,9 +57,9 @@ class GetUpLog(BaseCallback):
 
 class GetUpVideo(BaseCallback):
     """Film one deterministic episode every `freq` steps."""
-    def __init__(self, cfg, weights, video_dir, freq):
+    def __init__(self, cfg, weights, start, video_dir, freq):
         super().__init__()
-        self.env = GetUpEnv(cfg.to_dict(), weights, render_mode="rgb_array", width=320, height=240)
+        self.env = GetUpEnv(cfg.to_dict(), weights, start, render_mode="rgb_array", width=320, height=240)
         self.dir, self.freq, self.last = Path(video_dir), freq, 0
         self.dir.mkdir(parents=True, exist_ok=True)
 
@@ -94,8 +96,11 @@ def main():
     p.add_argument("--video-every", type=int, default=1_000_000)
     p.add_argument("--seconds", type=float, default=6.0, help="episode length")
     p.add_argument("--weights", nargs="*", default=[], metavar="NAME=VALUE", help="reward weights (GetUpWeights)")
+    p.add_argument("--start", nargs="*", default=[], metavar="NAME=VALUE", help="varied start poses (GetUpStart)")
+    p.add_argument("--physics-from", help="a walking run whose physics randomization to train on (default: nominal robot)")
     p.add_argument("--resume", help="a getup run to continue from (its policy and normalization)")
     p.add_argument("--min-std", type=float, default=0.2, help="with --resume: raise the exploration noise to at least this")
+    p.add_argument("--lr", type=float, help="with --resume: learning rate (default: the run's own, 3e-4)")
     p.add_argument("--overwrite", action="store_true")
     args = p.parse_args()
     check_name(args.run_name)
@@ -109,25 +114,32 @@ def main():
         if k not in GetUpWeights.__dataclass_fields__:
             raise SystemExit(f"unknown weight {k}: {', '.join(GetUpWeights.__dataclass_fields__)}")
         weights[k] = float(v)
-    cfg = config(args.seconds)
+    start = {}
+    for item in args.start:
+        k, v = item.split("=")
+        if k not in GetUpStart.__dataclass_fields__:
+            raise SystemExit(f"unknown start setting {k}: {', '.join(GetUpStart.__dataclass_fields__)}")
+        start[k] = bool(int(v)) if k == "any_heading" else float(v)
+    cfg = config(args.seconds, args.physics_from)
     (run_dir / "config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
-    (run_dir / "getup.json").write_text(json.dumps({"weights": {**vars(GetUpWeights()), **weights}}, indent=2))
+    (run_dir / "getup.json").write_text(json.dumps({"weights": {**vars(GetUpWeights()), **weights},
+                                                    "start": {**vars(GetUpStart()), **start}}, indent=2))
     args.stage = "getup"
     start_record(run_dir, args)
 
     env = make_vec_env("biped_rl:BipedGetUp-v0", n_envs=args.n_envs, seed=0, vec_env_cls=SubprocVecEnv,
-                       env_kwargs={"config": cfg.to_dict(), "weights": weights})
+                       env_kwargs={"config": cfg.to_dict(), "weights": weights, "start": start})
     if args.resume:
         env = VecNormalize.load(str(Path(args.resume) / "vecnormalize.pkl"), env)
         model = PPO.load(Path(args.resume) / "final_model", env=env, device="cpu", tensorboard_log=str(run_dir),
-                         custom_objects={"n_steps": n_steps_for(args.n_envs)})
+                         custom_objects={"n_steps": n_steps_for(args.n_envs), **({"learning_rate": args.lr} if args.lr else {})})
         with torch.no_grad():  # room to try something new
             floor = torch.full_like(model.policy.log_std, float(np.log(args.min_std)))
             model.policy.log_std.copy_(torch.maximum(model.policy.log_std, floor))
         print(f"resumed from {args.resume}", flush=True)
     else:
         model, env = new_model(cfg, env, tensorboard_log=str(run_dir))
-    callbacks = [GetUpLog(), GetUpVideo(cfg, weights, run_dir / "videos", args.video_every),
+    callbacks = [GetUpLog(), GetUpVideo(cfg, weights, start, run_dir / "videos", args.video_every),
                  CheckpointCallback(save_freq=max(2_000_000 // args.n_envs, 1), save_path=str(run_dir / "checkpoints"),
                                     save_vecnormalize=True)]
     try:

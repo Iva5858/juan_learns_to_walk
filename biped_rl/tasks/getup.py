@@ -5,7 +5,9 @@ Same robot, servo model (speed and torque limits, the measured stiffness and del
 as walking (BipedEnv), so a policy that gets up could later hand over to the walking one. What differs:
   * a much wider action range (GETUP_ACTION_SCALE): getting up needs most of each joint's travel, not
     +-29 deg around the home crouch;
-  * no randomization: the same start every time (nominal physics), on the measured servos;
+  * the same start every time on the nominal robot (juan_getup_1-8), or with `start` (GetUpStart) varied
+    lying poses (face down to either side, any heading, bent joints) and `physics_from` the walking runs'
+    physics randomization (masses, friction, servo strength and delay, sensor noise; no shoves);
   * the reward (GetUpWeights, added each step): upright torso, height, and a bonus for standing on the
     feet only (held still), minus a small cost on jerky actions; nothing about protecting the servos;
   * an episode ends only at its time limit: lying on the ground is where it starts, not a fall.
@@ -23,6 +25,13 @@ from biped_rl.tasks.locomotion.mdp import events, observations
 # hip pitch +-92 deg, knee +-69 deg, ankle +-57 deg around home (clipped to the joint ranges).
 GETUP_ACTION_SCALE = [0.5, 1.6, 1.2, 1.0] * 2
 SETTLE_S = 1.0       # lying still, servos holding straight legs, before the policy takes over
+
+
+@dataclass
+class GetUpStart:
+    side_deg: float = 0.0      # rolled onto a side by up to this (0 = face down, 90 = lying on a side)
+    joint_rad: float = 0.0     # each joint bent by up to this from straight (clipped to its range)
+    any_heading: bool = False
 
 
 @dataclass
@@ -46,31 +55,46 @@ class GetUpWeights:
     action_rate: float = 0.05  # jerky actions (mean squared change per step, in action units)
 
 
-def config(episode_seconds=6.0):
-    """The getup task's EnvConfig: walking's, with the wide action range, no randomization, the measured
-    servos (as the nominal robot), and no commands."""
+def config(episode_seconds=6.0, physics_from=None):
+    """The getup task's EnvConfig: walking's, with the wide action range, the measured servos and no
+    commands; the nominal robot, or `physics_from` a walking run's physics randomization (no shoves, no
+    curricula: the full ranges from the start)."""
     cfg = EnvConfig()
     cfg.action_scale = list(GETUP_ACTION_SCALE)
     cfg.episode_seconds = episode_seconds
-    cfg.randomization.enabled = False
     cfg.robot.kp = juan.MEASURED_KP
-    cfg.randomization.nominal_delay_steps = juan.MEASURED_DELAY_STEPS[0]
+    if physics_from:
+        cfg.randomization = EnvConfig.load(physics_from).randomization
+        r = cfg.randomization
+        r.enabled, r.push_velocity, r.push_curriculum, r.physics_curriculum = True, 0.0, False, False
+    else:
+        cfg.randomization.enabled = False
+        cfg.randomization.nominal_delay_steps = juan.MEASURED_DELAY_STEPS[0]
     return cfg
 
 
 class GetUpEnv(BipedEnv):
-    def __init__(self, config=None, weights=None, render_mode=None, width=640, height=480):
+    def __init__(self, config=None, weights=None, start=None, render_mode=None, width=640, height=480):
         super().__init__(config, render_mode=render_mode, width=width, height=height)
         self.w = GetUpWeights(**(weights or {}))
+        self.start = GetUpStart(**(start or {}))
         self.lying_height = None
 
     def lie_face_down(self):
         """Legs straight, torso pitched 90 deg nose down, just above the floor; then SETTLE_S lying with
-        the servos holding straight legs."""
-        d, robot = self.data, self.robot
+        the servos holding the legs. With `start`: rolled toward a side, turned, joints bent, at random."""
+        d, robot, st, rng = self.data, self.robot, self.start, self.np_random
         self._reset_to_home()
-        d.qpos[robot.qpos_idx] = 0.0                           # legs straight
-        d.qpos[3:7] = [np.cos(np.pi / 4), 0.0, np.sin(np.pi / 4), 0.0]   # +90 deg about y: x (forward) points down
+        joints = np.clip(rng.uniform(-st.joint_rad, st.joint_rad, self.nu), robot.joint_lo, robot.joint_hi)
+        d.qpos[robot.qpos_idx] = joints
+        quat = np.array([np.cos(np.pi / 4), 0.0, np.sin(np.pi / 4), 0.0])   # +90 deg about y: x (forward) points down
+        side = np.radians(rng.uniform(-st.side_deg, st.side_deg))            # then rolled about the body's long axis
+        heading = rng.uniform(-np.pi, np.pi) if st.any_heading else 0.0      # (world x, after the pitch), then turned
+        for q in ([np.cos(side / 2), np.sin(side / 2), 0.0, 0.0], [np.cos(heading / 2), 0.0, 0.0, np.sin(heading / 2)]):
+            out = np.empty(4)
+            mujoco.mju_mulQuat(out, np.array(q), quat)
+            quat = out
+        d.qpos[3:7] = quat
         d.qpos[2] = 0.0
         d.qvel[:] = 0.0
         mujoco.mj_forward(self.model, d)
@@ -78,13 +102,16 @@ class GetUpEnv(BipedEnv):
                      if self.model.geom_bodyid[g] != 0 and (self.model.geom_contype[g] or self.model.geom_conaffinity[g]))
         d.qpos[2] = -lowest + 0.01
         mujoco.mj_forward(self.model, d)
-        self.episode.target = np.zeros(self.nu)
+        self.episode.target = joints.copy()
         for _ in range(int(SETTLE_S / self.dt)):
-            self.hold_pose(np.zeros(self.nu))
+            self.hold_pose(joints)
 
     def reset(self, *, seed=None, options=None):
         super(BipedEnv, self).reset(seed=seed)
-        events.set_nominal_physics(self)
+        if self.cfg.randomization.enabled:
+            events.randomize_physics(self)
+        else:
+            events.set_nominal_physics(self)
         self._reset_to_home()
         self._face_here()
         self._start_episode({"stand": True})   # (episode state for hold_pose; restarted below)
