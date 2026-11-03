@@ -190,6 +190,10 @@ class PiHealth:
         return 47.0
 
     @staticmethod
+    def addresses():
+        return ["127.0.0.1"]
+
+    @staticmethod
     def power():
         return {"undervolt": False, "throttled": False, "undervolt_before": False}
 

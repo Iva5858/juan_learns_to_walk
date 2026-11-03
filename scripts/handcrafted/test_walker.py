@@ -55,7 +55,7 @@ def run(env, policy, seed, plan, push=None, frames=None, trace=None):
     env.settle_at_home()
     obs = env.start_policy()
     env.episode.next_push = 2.0  # no random shove while still standing
-    total = sum(s for s, _ in plan)
+    sum(s for s, _ in plan)
     t_walk, p_walk, tilts, impacts = None, None, [], []
     fell = False
     t_end = 0.0
@@ -82,7 +82,7 @@ def run(env, policy, seed, plan, push=None, frames=None, trace=None):
                               env.data.qpos[env.robot.qpos_idx].copy(), env.episode.contact.copy()))
             if term:
                 fell = True
-                why = ("broke (impact %.1f bw)" % info["peak_force_bw"]) if info["broke"] else (
+                why = ("broke (impact {:.1f} bw)".format(info["peak_force_bw"])) if info["broke"] else (
                     "touch" if env.non_foot_ground_contact() else "tilt/height")
                 g = env.gravity_body()
                 why += " " + ("fwd" if g[0] > 0.3 else "back" if g[0] < -0.3 else "") + (
@@ -170,7 +170,7 @@ def check(policy):
     env = make_env(policy)
     env.reset(seed=1)
     env.settle_at_home()
-    obs = env.start_policy()
+    env.start_policy()
     ctrl = Controller(policy)
     ctrl.start(env.robot_readings(), phase=env.command.phase)
     worst = 0.0

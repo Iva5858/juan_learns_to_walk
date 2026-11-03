@@ -29,7 +29,17 @@ export function build(root) {
         <div class="sub">Check: tip it forward and "fwd" goes up; tip it to its right and "right" goes up. Gyro: rolling right gives
           x &gt; 0, nose down y &gt; 0, turning left z &gt; 0.</div></details></div>
     <div class="card"><h3>Voice, faces, camera</h3><div class="kv" id="sExtras"></div></div>
+    <div class="card"><h3>System</h3>
+      <div class="row"><button class="danger" id="sShutdown">Shut down dashboard</button>
+        <label class="sub"><input type="checkbox" id="sShutRelax"> relax the servos (else they hold)</label></div>
+      <div class="sub">Stops the walking policy and saves its log, stops gestures, faces and voice, then exits the
+        dashboard. Start it again on the Pi: <kbd>python3 -m robot.dashboard</kbd>.</div>
+      <div class="sub" id="sShutNote"></div></div>
   </div>`;
+  $('sShutdown').onclick = async () => {
+    const r = await call('shutdown', {relax: $('sShutRelax').checked});
+    if (!r.error) $('sShutNote').textContent = 'Dashboard shut down' + (r.log ? `; walk log saved: ${r.log}` : '') + '.';
+  };
   $('sZeroGyro').onclick = () => call('cal/zero_gyro');
   $('sLevel').onclick = () => call('cal/imu_level');
   $('sAxes').onclick = () => call('cal/imu', {axes: ['sAx0', 'sAx1', 'sAx2'].map(id => $(id).value).join(',')});
@@ -66,6 +76,7 @@ onState((S, full) => {
     <div>Memory<b>${p.mem_used_mb ? (p.mem_used_mb / 1024).toFixed(1) : '?'} GB</b>of ${p.mem_total_mb ? (p.mem_total_mb / 1024).toFixed(1) : '?'} GB</div>
     <div>CPU clock<b>${p.arm_mhz ? p.arm_mhz.toFixed(0) : '?'} MHz</b></div>
     <div>GPU clock<b>${p.gpu_mhz ? p.gpu_mhz.toFixed(0) : '?'} MHz</b></div>
+    <div style="grid-column:1/-1">Addresses (ssh iva585@…)<b style="font-size:13px;word-break:break-all">${(p.addresses || []).map(esc).join(' · ') || '?'}</b></div>
     <div>Wi-Fi<b class="${!has(p.wifi_dbm) ? '' : p.wifi_dbm < -75 ? 'bad' : p.wifi_dbm < -65 ? 'warn' : ''}">${has(p.wifi_dbm) ? p.wifi_dbm.toFixed(0) + ' dBm' : '?'}</b></div>`;
   $('sCores').innerHTML = (p.cores || []).map((c, i) => `<div title="core ${i}: ${c.toFixed(0)}%"><i style="height:${Math.max(2, c).toFixed(0)}%"></i></div>`).join('');
   $('sBuses').innerHTML = S.buses.map(bus => {

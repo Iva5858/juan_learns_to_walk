@@ -24,6 +24,16 @@ def throttle_flags():
         return None
 
 
+def addresses():
+    """The Pi's network addresses (hostname -I: IPv4 and IPv6, link-local left out), to reach it by ssh when
+    name.local doesn't resolve (hotspots), or [] off a Pi."""
+    try:
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=1).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [a for a in out.split() if not a.startswith("fe80")]
+
+
 def power():
     flags = throttle_flags()
     if flags is None:

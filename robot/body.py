@@ -160,6 +160,24 @@ class Robot:
         self.walker.stop("stopped from the page")
         self.all_buses(lambda b: b.stop())
 
+    def shutdown(self, relax=False):
+        """The stop sequence before the dashboard exits: the walking policy stops and its log is written
+        (its loop saves it on the way out: waited for), gestures stop, face greeting and voice listening
+        close, and the servos hold where they are (or relax). Returns the walk log saved, if any."""
+        was_walking = self.walker.running
+        self.personality.stop()
+        self.walker.stop("stopped: dashboard shut down")
+        if self.walker.thread is not None:
+            self.walker.thread.join(timeout=5.0)
+        self.personality.set_faces(False)
+        self.personality.set_listening(False)
+        if relax:
+            self.relax()
+        else:
+            self.all_buses(lambda b: b.stop())
+        self.message = "Dashboard shut down" + (": servos relaxed" if relax else ": servos holding")
+        return self.walker.stats.get("log") if was_walking else None
+
     def busy(self):
         """Why the servos can't be moved from the page right now (None: they can)."""
         if self.walker.running:
@@ -292,6 +310,7 @@ class Robot:
     # ---------------------------------------------------------------- Pi
     def _pi_loop(self):
         stats = self.hw.pi.SysStats()
+        loops, addrs = 0, []
         while True:
             t = self.hw.pi.temperature()
             if t is not None and not self.pi_hot and t >= PI_TEMP_LIMIT:
@@ -301,7 +320,10 @@ class Robot:
                 self.pi_hot = False
             if self.pi_hot:
                 self.relax()
-            self.pi = {"temp": t, **self.hw.pi.power(), **stats.read()}
+            if loops % 10 == 0:   # addresses change rarely: every 10 s
+                addrs = self.hw.pi.addresses()
+            self.pi = {"temp": t, **self.hw.pi.power(), **stats.read(), "addresses": addrs}
+            loops += 1
             time.sleep(1)
 
     # ---------------------------------------------------------------- page state

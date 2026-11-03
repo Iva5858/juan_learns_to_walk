@@ -107,3 +107,23 @@ def test_pages_are_served_and_nothing_else(server):
     for path in ("/web/../dashboard.py", "/web/missing.js"):
         with pytest.raises(urllib.error.HTTPError):
             urllib.request.urlopen(base + path)
+
+
+def test_shutdown_saves_the_walk_log_and_stops_the_server(tmp_path):
+    cal = str(tmp_path / "calibration.json")
+    robot = Robot(fake.hardware(cal), cal)
+    robot.walker.log_dir = str(tmp_path)
+    dashboard.robot = robot
+    srv = dashboard.serve(0)
+    dashboard.attach_exit(robot, srv)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://localhost:{srv.server_address[1]}"
+    time.sleep(0.5)   # the first sensor readings
+    assert call(base, "policy/start", name=POLICY)[0] == 200
+    time.sleep(0.5)
+    status, reply = call(base, "shutdown")
+    assert status == 200 and reply["log"] and reply["log"].endswith(".npz")
+    assert list(tmp_path.glob("*.npz")) and not robot.walker.running
+    thread.join(timeout=3)
+    assert not thread.is_alive()   # serve_forever returned: the dashboard exits

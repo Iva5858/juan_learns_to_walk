@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import socket
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -154,6 +155,14 @@ class DualStackServer(ThreadingHTTPServer):
         super().server_bind()
 
 
+def attach_exit(robot, server):
+    """The page's Shut down: the server stops a moment after replying (from another thread: shutdown()
+    waits for serve_forever, which is running the request)."""
+    def exit_dashboard():
+        threading.Timer(0.5, server.shutdown).start()
+    robot.exit_dashboard = exit_dashboard
+
+
 def serve(port):
     try:
         return DualStackServer(("::", port), Handler)
@@ -180,6 +189,7 @@ def main():
         robot.walker.log_dir = fake_dir
     else:
         robot = Robot()
+    attach_exit(robot, server)
     for bus in robot.buses:
         print(f"Bus {bus.port}: servos {', '.join(map(str, bus.ids))}")
     missing = sorted(set(BY_ID) - set(robot.bus_of))
@@ -192,6 +202,7 @@ def main():
     print(f"Dashboard:   http://{host}:{a.port}   (Ctrl+C stops and holds position)")
     try:
         server.serve_forever()
+        print("Shut down from the page.")
     except KeyboardInterrupt:
         robot.stop()
         print("\nStopped.")
