@@ -99,6 +99,7 @@ class RewardWeights:
     # following the command
     path_offset: float = 2.0                # distance^2 from the commanded path [m^2] (0.02 at 10 cm)
     stand_still: float = 1.0                # moving < 50% of a walking command (0 at half speed, 1 stopped)
+    stand_still_moves: float = 0.0          # the same for side-step and turn-in-place commands
     stand_pose: float = 20.0                # commanded to stand: joints away from home, mean [rad^2]
     stand_feet: float = 0.0                 # commanded to stand: one foot ahead of the other, per 5 cm
                                             # (7 deg off costs ~0.26, 2 deg of balancing ~0.02)
@@ -257,7 +258,10 @@ class EnvConfig:
     rewards: RewardWeights = field(default_factory=RewardWeights)
     randomization: RandomizationConfig = field(default_factory=RandomizationConfig)
     control_hz: float = 50.0     # policy rate
-    action_scale: float = 0.5    # rad of servo target offset from the home pose per unit action
+    action_scale: float = 0.5    # rad of servo target offset from the home pose per unit action; or one
+                                 # per joint (robot/joints.py order): scripts/rescale_actions.py
+    smoothness_scale: float = None  # rad per unit action that action_rate and action_acc count in
+                                    # (None = action_scale): a rescaled policy keeps its smoothness costs
     action_filter: float = 0.5   # EMA on the actions (1 = off); the robot uses the same filter
     history: int = 3             # past sensor frames stacked into the observation
     episode_seconds: float = 20.0

@@ -31,7 +31,7 @@ class FakeWalker:
         self.ctrl = SimpleNamespace(command=np.zeros(3))
         self.stopped = None
 
-    def set_command(self, vx, vy, wz):
+    def set_command(self, vx, vy, wz, source="page"):
         self.ctrl.command = np.array([vx, vy, wz])
 
     def stop(self, why="stopped", relax=False):

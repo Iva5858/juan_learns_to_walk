@@ -14,7 +14,7 @@ What it does:
     hip pitch, knee and ankle ranges: PITCH_RANGE_DEG (the robot's measured ranges, minus a margin)
   * removes any coupling between joints (Onshape gear relations) and gives all 8 joints a servo
   * foot soles = the rolled TPU soles (a convex rocker, stable contact instead of mesh hulls), capsules on
-    thighs and shins (legs cannot pass through each other; knee on the floor = a fall)
+    thighs and shins (legs cannot pass through each other; knee on the floor = a fall), a box on the head
   * IMU site, home keyframe (crouched, feet flat, just touching the floor)
 """
 import argparse
@@ -85,6 +85,9 @@ ROLL_INWARD_DEG, ROLL_OUTWARD_DEG = 26.0, 19.0
 # the narrower of the two legs (the policy is mirror-symmetric).
 PITCH_RANGE_DEG = {"hip_pitch": (-112.0, 104.0), "knee": (-106.0, 110.0), "ankle": (-78.0, 79.0)}
 HOME = {"hip_roll": 0.0, "hip_pitch": -0.4, "knee": 0.8, "ankle": -0.4}  # rad, training conventions
+
+
+HEAD_PARTS = r"^(8_head_shelf|9_head_cover|pi_camera)"   # the head's collision box covers these
 
 
 def fmt(v):
@@ -311,6 +314,29 @@ def main():
             next(g for g in bodies[f"{side}_{seg}_link"].findall("geom")
                  if g.get("name") == f"{side}_{seg}_link_capsule").set("size", f"{r:.4g}")
         report.append(f"{seg}s: collision capsule radius {1000 * r:.0f} mm (both legs)")
+
+    # ---- head: the Onshape export collides only the pelvis; the head (shelf, cover, camera) sits 7 cm above it
+    # and would pass through the floor in a face-down fall or when getting up. A box around those parts.
+    model = compile_xml(tree, tmp)
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    bid = model.body("body").id
+    R0, x0 = data.xmat[bid].reshape(3, 3), data.xpos[bid]
+    head = []
+    for g in range(model.ngeom):
+        mname = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_MESH, model.geom_dataid[g]) or ""
+        if model.geom_bodyid[g] == bid and re.match(HEAD_PARTS, mname):
+            mid = model.geom_dataid[g]
+            v = model.mesh_vert[model.mesh_vertadr[mid]:model.mesh_vertadr[mid] + model.mesh_vertnum[mid]]
+            head.append((data.geom_xpos[g] + v @ data.geom_xmat[g].reshape(3, 3).T - x0) @ R0)
+    if head:
+        pts = np.vstack(head)
+        lo, hi = pts.min(axis=0), pts.max(axis=0)
+        ET.SubElement(bodies["body"], "geom", name="head_box", type="box", size=fmt((hi - lo) / 2),
+                      pos=fmt((hi + lo) / 2), density="0", rgba="0.8 0.3 0.3 0.25", group="3")
+        report.append(f"head: collision box {np.round(1000 * (hi - lo)).astype(int)} mm (x y z)")
+    else:
+        report.append(f"WARNING: no head part matched {HEAD_PARTS!r}: the head has no collision")
 
     # ---- IMU site at the BNO055 (axes = torso axes; confirm the chip mounting on the robot)
     imu = [geom for part, geom, body in part_geoms(root) if part.startswith("adafruit_bno055")

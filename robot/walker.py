@@ -7,8 +7,10 @@ Safety, checked every tick:
   * lost connection (no page or joystick for LINK_STAND_S): command set to "stand still";
     after LINK_STOP_S: policy off, servos hold. (Long enough to ride out a backgrounded tab or a
     Wi-Fi gap.)
-Every run is logged to robot/logs/ (observations, actions, targets, joints, IMU, timing) for
-comparing with the simulator.
+Commands come from a source (the page, a joystick, voice, a behavior such as the victory spin); a
+behavior can take the steering (steer_owner) so nothing else changes the command until it is done.
+Every run is logged to robot/logs/ (observations, actions, targets, joints, IMU, timing, whether the
+camera and face detection were running) for comparing with the simulator.
 """
 import math
 import os
@@ -62,14 +64,20 @@ class Walker:
         self.last_link = time.monotonic()
         self.stats = {}
         self.listener = None          # called with "start", "stop", "fall" or "lost" (personality sounds)
+        self.command_source = None    # who sent the current command
+        self.steer_owner = None       # a behavior steering: other sources are refused until it lets go
+        self.log_dir = LOG_DIR
 
     # ---- from the page ----
     def heartbeat(self):
         self.last_link = time.monotonic()
 
-    def set_command(self, vx, vy, wz):
+    def set_command(self, vx, vy, wz, source="page"):
         if self.ctrl is None:
             return "policy not running"
+        if self.steer_owner and source != self.steer_owner:
+            return f"{self.steer_owner} is steering: stop it first"
+        self.command_source = source
         m = self.ctrl.policy.meta
         clip = lambda v, r: float(min(max(v, float(r[0])), float(r[1])))
         self.ctrl.set_command(clip(vx, m["forward_range"]), clip(vy, m["lateral_range"]), clip(wz, m["yaw_rate_range"]))
@@ -112,6 +120,7 @@ class Walker:
         self.ctrl = Controller(policy)
         self.ctrl.start(sensors)
         self.policy_name, self.running, self.status = name, True, "running"
+        self.command_source, self.steer_owner = None, None
         self.heartbeat()
         self.thread = threading.Thread(target=self._loop, daemon=True)
         self.thread.start()
@@ -162,6 +171,14 @@ class Walker:
         pi["imu_failures"] = getattr(getattr(r, "imu", None), "failures", None)
         return [np.nan if pi.get(k) is None else float(pi[k]) for k in PI_FIELDS]
 
+    def _vision(self):
+        """(camera streamed in the last 2 s, face detection on): what else was using the Pi."""
+        r = self.robot
+        cam = getattr(r, "camera", None)
+        seen = getattr(cam, "last_view", 0.0)
+        return [float(bool(seen) and time.monotonic() - seen < 2.0),
+                float(getattr(getattr(r, "personality", None), "faces", None) is not None)]
+
     def _send(self, targets_rad):
         r, per_bus = self.robot, {}
         for n, rad in zip(NAMES, targets_rad):
@@ -175,7 +192,7 @@ class Walker:
     def _loop(self):
         dt = self.ctrl.dt
         log = {k: [] for k in ("t", "obs", "action", "target", "q", "qd", "gravity", "gyro", "yaw", "command", "tick_ms",
-                               "link_s", "vin", "temp", "pi", "gravity_raw")}
+                               "link_s", "vin", "temp", "pi", "gravity_raw", "vision")}
         link_max = 0.0
         stale, overruns, ticks = 0, 0, 0
         next_t = time.monotonic()
@@ -209,7 +226,7 @@ class Walker:
                              ("gravity", sensors["gravity"]), ("gyro", sensors["gyro"]), ("yaw", sensors["yaw"]),
                              ("command", self.ctrl.command.copy()), ("link_s", quiet),
                              ("vin", self._slow("vin")), ("temp", self._slow("temp")), ("pi", self._pi()),
-                             ("gravity_raw", sensors["gravity_raw"])):
+                             ("gravity_raw", sensors["gravity_raw"]), ("vision", self._vision())):
                     log[k].append(np.array(v, dtype=float))
             took = (time.perf_counter() - start) * 1000
             log["tick_ms"].append(took)
@@ -231,9 +248,9 @@ class Walker:
     def _save(self, log):
         if not log["t"]:
             return
-        os.makedirs(LOG_DIR, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
         stamp = time.strftime("%Y-%m-%d_%H%M%S") + f"{time.time() % 1:.3f}"[1:]
-        path = os.path.join(LOG_DIR, f"{stamp}_{self.policy_name}.npz")
+        path = os.path.join(self.log_dir, f"{stamp}_{self.policy_name}.npz")
         np.savez_compressed(path, joints=np.array(NAMES), status=self.status, move_ms=self.move_ms,
                             pi_fields=np.array(PI_FIELDS), imu_offset=np.array(self.robot.cal.imu_offset),
                             **{k: np.array(v) for k, v in log.items()})
@@ -243,5 +260,6 @@ class Walker:
         return {"running": self.running, "status": self.status, "policy": self.policy_name,
                 "link_s": time.monotonic() - self.last_link, "link_limits": [LINK_STAND_S, LINK_STOP_S],
                 "policies": policies(), "default": default_policy(), "move_ms": self.move_ms, **self.stats,
+                "command_source": self.command_source, "steer_owner": self.steer_owner,
                 "ranges": None if self.ctrl is None else {k: np.asarray(self.ctrl.policy.meta[k]).tolist()
                                                           for k in ("forward_range", "lateral_range", "yaw_rate_range")}}

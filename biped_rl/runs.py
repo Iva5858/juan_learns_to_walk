@@ -16,7 +16,7 @@ from biped_rl.tasks.locomotion import BipedEnv
 RUNS = Path("runs")
 # A run's name: runs/<generation>/<name>. A generation is one line of training from scratch (v7, v8, ...);
 # fine-tunes of it stay in it (juan_v7_13 -> juan_v7_14). Failed runs move to runs/archive/<generation>/.
-RUN_NAME = re.compile(r"^(v\d+|hop|early|archive/[\w.-]+|test)/[\w.-]+$")
+RUN_NAME = re.compile(r"^(v\d+|hop|early|getup|archive/[\w.-]+|test)/[\w.-]+$")
 
 
 def load_policy(run, cfg, best=False):
@@ -34,7 +34,7 @@ def check_name(name):
     """Refuse a run name outside the layout (a bare name would land in runs/ itself, unsorted)."""
     if not RUN_NAME.match(name):
         raise SystemExit(f"run name {name!r}: use <generation>/<name>, e.g. v7/juan_v7_21_speed "
-                         "(generations: v1, v2, ..., hop, early, test; see docs/runs.md)")
+                         "(generations: v1, v2, ..., hop, early, getup, test; see docs/runs.md)")
 
 
 def _commit():

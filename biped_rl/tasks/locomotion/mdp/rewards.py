@@ -134,13 +134,13 @@ def hip_roll_inward(env, s, w):
 
 def action_rate(env, s, w):
     """First difference of the actions."""
-    return w.action_rate * np.mean((s.action - env.episode.last_action) ** 2)
+    return w.action_rate * np.mean(((s.action - env.episode.last_action) * env.smoothness_unit) ** 2)
 
 
 def action_acc(env, s, w):
     """Second difference of the actions (jerk)."""
     ep = env.episode
-    return w.action_acc * np.mean((s.action - 2 * ep.last_action + ep.last_action2) ** 2)
+    return w.action_acc * np.mean(((s.action - 2 * ep.last_action + ep.last_action2) * env.smoothness_unit) ** 2)
 
 
 def joint_acc(env, s, w):
@@ -269,10 +269,24 @@ def stand_still(env, s, w):
     return 0.0
 
 
+def stand_still_moves(env, s, w):
+    """stand_still for the other moves: not side-stepping on a sideways command (from 0.05 m/s), not
+    turning on a turn-in-place command (from 0.2 rad/s). Without it standing still there cost only the
+    small tracking_lat_yaw term, and no policy side-stepped."""
+    if w.stand_still_moves == 0 or abs(s.cmd[0]) > 0.05:
+        return 0.0
+    if abs(s.cmd[1]) > 0.05:
+        return w.stand_still_moves * float(np.clip(1.0 - s.vy / (0.5 * s.cmd[1]), 0.0, 1.0))
+    if abs(s.cmd[2]) > 0.2:
+        return w.stand_still_moves * float(np.clip(1.0 - s.ang_world[2] / (0.5 * s.cmd[2]), 0.0, 1.0))
+    return 0.0
+
+
 PENALTY_TERMS = (path_offset, orientation, ang_vel_xy, lin_vel_z, base_height, knee_hyperextension,
                  hip_roll, hip_roll_inward, action_rate, action_acc, joint_acc, servo_load,
                  servo_saturation, servo_overload, backdrive, impact, foot_slip, joint_limits,
-                 feet_distance, energy, symmetry, gait_mismatch, footstep, reversals, stand_still, stand_pose,
+                 feet_distance, energy, symmetry, gait_mismatch, footstep, reversals, stand_still, stand_still_moves,
+                 stand_pose,
                  stand_feet, double_support)
 
 # Free while recovering (1 s after a shove, the torso tilted beyond recover_tilt_deg, or stand_settle_s after

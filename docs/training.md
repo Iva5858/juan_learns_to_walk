@@ -16,7 +16,7 @@ Forward speed (−0.15 m/s up to a speed curriculum's top), sideways speed (±0.
 
 | Goal | Terms |
 |---|---|
-| Follow the command | `tracking_vel`, `tracking_lat_yaw`, `heading`, `path_offset`, `stand_still`, `stand_pose` |
+| Follow the command | `tracking_vel`, `tracking_lat_yaw`, `heading`, `path_offset`, `stand_still` (`stand_still_moves`: sideways, turning), `stand_pose` |
 | Don't fall | `alive`, `termination`, `orientation`, `ang_vel_xy`, `lin_vel_z`, `base_height` |
 | Protect the servos | `servo_load`, `servo_overload`, `servo_saturation`, `backdrive`, `impact`, `joint_limits`, `energy` |
 | Smooth, low-wear motion | `action_rate`, `action_acc`, `joint_acc`, `reversals`, `footstep` |
@@ -57,7 +57,11 @@ Each one is `FROM=<start> STEPS=<n> ./scripts/finetune.sh v7/<name> <options>`, 
 | v7_21_steady | v7_13_straight | 30M | `--reward tracking_vel=5.0 tracking_broad_share=0.3 feet_distance=10.0 min_feet_distance=0.09` (STEADY) | **good on the robot**; 18 cm/s at 0.4 m/s |
 | v7_22_straight | v7_21_steady | 20M | STEADY + `--reward heading=3.0 tracking_lat_yaw=2.0 --randomization joint_offset=0.05` | not better (more falls) |
 | v7_23_shoves | v7_21_steady | 30M | v7_22's + `--randomization push_velocity=0.5` | not better |
-| v7_24_speed | v7_21_steady | 150M | STEADY + `--command speed_range=0.0,0.6 fast_prob=0.3 --reward step_length=2.0 step_length_target=0.10` | sim: 0.22 m/s at 0.4+ (v7_21: 0.12), fewer falls |
+| v7_24_speed | v7_21_steady | 150M | STEADY + `--command speed_range=0.0,0.6 fast_prob=0.3 --reward step_length=2.0 step_length_target=0.10` | sim: 0.22 m/s at 0.4+ (v7_21: 0.12), fewer falls; works on the robot, leans while standing |
+| v7_25_stand | v7_24_speed | 30M | v7_24's (SPEED) + `--reward recover_tilt_deg=20` | KEEP: standing tilt 9.5° → 5.1°, same speed, no calm falls; lost turning in place |
+| v7_26_moves | v7_25_stand | 100M | SPEED + `--reward recover_tilt_deg=20 stand_still_moves=1.0 tracking_lat_yaw=2.0 --command turn_in_place_prob=0.25 sideways_prob=0.15 backward_prob=0.15` | not better (3 calm falls); `_best`: turning in place back (~100%), same speed, tilt 2.9°; still no sideways or backward |
+| v7_25_range08 | v7_25_stand | – | `python scripts/rescale_actions.py runs/v7/juan_v7_25_stand runs/v7/juan_v7_25_range08 --scale 0.8 --joints hip_pitch knee ankle` | same walk, hip pitch, knee and ankle reach ±46° |
+| v7_27_range | v7_25_range08 | 100M | v7_25's | no faster (uses the range only at the knee, for lift); final falls more; `_best` KEEP by fewer shove falls |
 
 The 0.8 rad runs (v7_14–v7_20) did well in the simulator and badly on the robot; the 0.5 rad line (v7_13, v7_21, v7_24) is the one that walks.
 
@@ -79,7 +83,7 @@ Walking clips land in `runs/<generation>/<name>/videos/` (layout: [runs.md](runs
 |---|---|
 | `scripts/evaluate.py --run R [--robust -n 50] [--sweep]` | speed, gait, impacts, saturation, smoothness, drift; fall rate under randomization; top speed |
 | `scripts/play.py --run R [--test]` | drive it with the keyboard after the robot's boot sequence; `--test` checks it without a window |
-| `scripts/analysis/walk_test.py R ...` | the robot's way of walking (stand at home, take over, walk 8 s) at 0.1–0.6 m/s, calm and with shoves: speed reached, falls and hardware-limit stops, drift, weave, cadence, step length, foot lift; `--verdict` judges runs against the first |
+| `scripts/analysis/walk_test.py R ...` | the robot's way of walking (stand at home, take over, walk 8 s) at 0.1–0.6 m/s, calm and with shoves: speed reached, falls and hardware-limit stops, drift, weave, cadence, step length, foot lift, standing tilt and crouch; `--verdict` judges runs against the first; `--moves`: backward, sideways, turning |
 | `scripts/analysis/stand_pushes.py R ...` | commanded to stand: shoves from 8 directions at growing strength |
 | `scripts/analysis/standing.py NAME` | an exported policy through the robot's own controller: standing lean, offset from home, the jump at take-over |
 | `scripts/analysis/replay.py LOG` | a robot log replayed through the simulator: which servo model matches the real joints |

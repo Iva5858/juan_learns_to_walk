@@ -93,7 +93,7 @@ polarity at the first servo of each cable chain.
 
 | # | Test | Expect |
 |---|---|---|
-| 6.1 | Temporarily set `SERVO_TEMP_LIMIT = 35` in `robot/dashboard.py`, hold home until one servo reaches 35 °C (or warm it with your hand) | that servo relaxes, its card turns red and locks; it unlocks below 30 °C. Set the limit back to 60 |
+| 6.1 | Temporarily set `SERVO_TEMP_LIMIT = 35` in `robot/body.py`, hold home until one servo reaches 35 °C (or warm it with your hand) | that servo relaxes, its card turns red and locks; it unlocks below 30 °C. Set the limit back to 60 |
 | 6.2 | Same for the Pi with `PI_TEMP_LIMIT` set just above the current Pi temperature (run something heavy, e.g. the camera) | every servo relaxes; recovers when cooler. Set it back to 75 |
 | 6.3 | Servo power switch off while holding home | cards go grey or stale, nothing crashes; on again + Rescan restores |
 

@@ -3,6 +3,7 @@
 import sys
 
 import numpy as np
+import pytest
 import torch
 
 from biped_rl.runs import load_policy
@@ -16,14 +17,19 @@ def mean_action(model, norm, obs):
         return model.policy._action_distribution(t).distribution.mean.numpy()[0]
 
 
-def test_rescaled_policy_moves_the_same(tmp_path, monkeypatch):
+@pytest.mark.parametrize("joints", [[], ["--joints", "hip_pitch", "knee", "ankle"]])
+def test_rescaled_policy_moves_the_same(tmp_path, monkeypatch, joints):
     out = tmp_path / "scaled"
-    monkeypatch.setattr(sys, "argv", ["rescale", str(CHECKPOINT), str(out), "--scale", "0.8"])
+    monkeypatch.setattr(sys, "argv", ["rescale", str(CHECKPOINT), str(out), "--scale", "0.8", *joints])
     load_script("rescale_actions.py").main()
     old_cfg, new_cfg = EnvConfig.load(CHECKPOINT), EnvConfig.load(out)
-    r = old_cfg.action_scale / new_cfg.action_scale
     old, new = load_policy(CHECKPOINT, old_cfg), load_policy(out, new_cfg)
-    env = BipedEnv(old_cfg.to_dict())
+    env, new_env = BipedEnv(old_cfg.to_dict()), BipedEnv(new_cfg.to_dict())
+    r = env.action_scale / new_env.action_scale
+    assert np.allclose(r, 0.625 if not joints else [1, 0.625, 0.625, 0.625] * 2)
+    # the same radians cost the same smoothness penalty: actions r x as large, counted 1/r x
+    assert np.allclose(new_env.smoothness_unit * r, env.smoothness_unit)
+    assert new_cfg.rewards.action_rate == old_cfg.rewards.action_rate
     obs, _ = env.reset(seed=0)
     frame = 6 + 3 * env.nu
     for _ in range(100):
@@ -35,4 +41,3 @@ def test_rescaled_policy_moves_the_same(tmp_path, monkeypatch):
         obs, _, term, trunc, _ = env.step(np.clip(a_old, -1, 1))
         if term or trunc:
             obs, _ = env.reset()
-    assert np.isclose(new_cfg.rewards.action_rate, old_cfg.rewards.action_rate / r**2)

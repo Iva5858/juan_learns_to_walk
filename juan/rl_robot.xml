@@ -800,6 +800,7 @@
           <geom name="right_thigh_link_capsule" type="capsule" size="0.02472" fromto="0 0.015 -0.000105 0 0.085 -0.000595" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
         </body>
       </body>
+      <geom name="head_box" type="box" size="0.053564 0.0734249 0.0348644" pos="0.00011795 -0.00015209 0.396867" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
       <site name="imu" pos="-0.03 0.0458476 0.3978" size="0.005" />
     </body>
   </worldbody>

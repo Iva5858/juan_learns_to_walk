@@ -199,6 +199,8 @@ class BipedEnv(gym.Env):
         self.nu = m.nu
 
         self.robot = self._load_robot()
+        self.action_scale = np.broadcast_to(np.asarray(cfg.action_scale, dtype=np.float64), (self.nu,)).copy()
+        self.smoothness_unit = self.action_scale / (cfg.smoothness_scale or self.action_scale)
         self.servo, self.domain = ServoState(), DomainState()
         events.set_nominal_physics(self)
         rc = cfg.randomization
@@ -397,7 +399,7 @@ class BipedEnv(gym.Env):
         cfg, m, d, sv, ep, robot = self.cfg, self.model, self.data, self.servo, self.episode, self.robot
         a = cfg.action_filter
         ep.filtered = a * action + (1 - a) * ep.filtered
-        new_target = np.clip(robot.home_joint + cfg.action_scale * ep.filtered, robot.joint_lo, robot.joint_hi)
+        new_target = np.clip(robot.home_joint + self.action_scale * ep.filtered, robot.joint_lo, robot.joint_hi)
         ep.target_buf.append(new_target)
         new_target = ep.target_buf[-1 - min(sv.action_delay, len(ep.target_buf) - 1)]  # bus delay
         w = cfg.rewards

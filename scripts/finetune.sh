@@ -4,7 +4,8 @@
 #      walking, hardware limits these servos meet) plus any train.py options given after the name;
 #   2. export the final and the best model to robot/policies/ (each checked against the simulator);
 #   3. walk test (scripts/analysis/walk_test.py) of FROM, the final and the best model, with a KEEP / NOT
-#      BETTER verdict for each against FROM, then the standing shove test. Report: runs/logs/<name>_report.txt.
+#      BETTER verdict for each against FROM, the other moves (backward, sideways, turning: walk_test --moves),
+#      then the standing shove test. Report: runs/logs/<name>_report.txt.
 # The recipes of every fine-tune so far are in docs/training.md.
 #
 #   caffeinate -i ./scripts/finetune.sh v7/juan_v7_25 2>&1 | tee runs/logs/v7/juan_v7_25.log      # ~1.5 h for 30M steps
@@ -41,6 +42,8 @@ done
 echo "=== $(date +%H:%M) 3/3 judge against $FROM -> $REPORT"
 {
     python scripts/analysis/walk_test.py "$FROM" ${exported[@]+"${exported[@]}"} --verdict --json "${REPORT%.txt}.json"
+    echo
+    python scripts/analysis/walk_test.py "$FROM" ${exported[@]+"${exported[@]}"} --moves --json "${REPORT%.txt}_moves.json"
     if [[ -z ${QUICK:-} ]]; then
         echo
         python scripts/analysis/stand_pushes.py "$FROM" ${exported[@]+"${exported[@]}"}

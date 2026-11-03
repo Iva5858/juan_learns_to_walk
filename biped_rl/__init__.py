@@ -13,5 +13,6 @@ from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 
 # Episode length is set by EnvConfig.episode_seconds (the env truncates itself).
 gym.register(id="Biped-v0", entry_point="biped_rl.tasks.locomotion.env:BipedEnv")
+gym.register(id="BipedGetUp-v0", entry_point="biped_rl.tasks.getup:GetUpEnv")   # getting up (tasks/getup.py)
 
 __all__ = ["BipedEnv", "EnvConfig"]

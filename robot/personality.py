@@ -230,8 +230,8 @@ class Personality:
             vx, vy, wz = w.ctrl.command
             vx, wz = {"walk": (action[-1], 0.0), "turn": (vx, action[-1]), "faster": (vx + 0.05, wz),
                       "slower": (vx - 0.05, wz), "stop": (0.0, 0.0)}[kind]
-            w.set_command(vx, 0.0 if kind in ("walk", "stop") else vy, wz)
-            self.voice.say("ok")
+            refused = w.set_command(vx, 0.0 if kind in ("walk", "stop") else vy, wz, source="voice")
+            self.voice.say("curious" if refused else "ok")
 
     def victory_spin(self):
         """Turn in place a full circle (IMU heading), stop the walking policy, then a happy bounce."""
@@ -241,6 +241,7 @@ class Personality:
         if self.spinning:
             return "already spinning"
         self.spinning = True
+        w.steer_owner = "spin"
         threading.Thread(target=self._spin, daemon=True).start()
         return None
 
@@ -249,20 +250,21 @@ class Personality:
         try:
             last, turned, t0 = r.imu.state["yaw"], 0.0, time.monotonic()
             while w.running and abs(turned) < 2 * math.pi and time.monotonic() - t0 < SPIN_TIMEOUT_S:
-                w.set_command(0.0, 0.0, SPIN_RATE)
+                w.set_command(0.0, 0.0, SPIN_RATE, source="spin")
                 time.sleep(0.05)
                 yaw = r.imu.state["yaw"]
                 turned += (yaw - last + math.pi) % (2 * math.pi) - math.pi
                 last = yaw
             if not w.running:
                 return
-            w.set_command(0.0, 0.0, 0.0)
+            w.set_command(0.0, 0.0, 0.0, source="spin")
             time.sleep(1.5)  # settle into standing
             w.stop("stopped: victory spin")
             time.sleep(0.5)
             self.play("happy_bounce")
         finally:
             self.spinning = False
+            w.steer_owner = None
 
     def state(self):
         return {"gesture": self.gesture, "playful": self.playful, "voice": self.voice.state(),

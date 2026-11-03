@@ -1,0 +1,8 @@
+{
+  "name": "Juan",
+  "short_name": "Juan",
+  "start_url": "/#drive",
+  "display": "standalone",
+  "background_color": "#111316",
+  "theme_color": "#111316"
+}
