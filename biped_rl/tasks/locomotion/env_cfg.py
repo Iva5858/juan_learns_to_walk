@@ -209,6 +209,11 @@ class RandomizationConfig:
     # recovering from odd states is practised from the first step. Joint angles = home x a per-joint
     # scale (hip roll's home is 0: it keeps the small additive noise only).
     reset_joint_scale: tuple = (0.7, 1.3)
+    # Starting some episodes where the getup policy hands over (scripts/getup_pool.py: the robot's exact state,
+    # often a 20+ cm lunge), commanded to stand for START_POOL_STAND_S, then commands as usual: the walker
+    # learns to step out of it into its stance. None / 0 = off.
+    start_pool: str = None
+    start_pool_prob: float = 0.0
     reset_lin_vel: float = 0.2              # m/s, +- per horizontal axis
     reset_ang_vel: float = 0.5              # rad/s, +- per axis
     # --- shoves: a velocity kick to the torso every push_interval ---

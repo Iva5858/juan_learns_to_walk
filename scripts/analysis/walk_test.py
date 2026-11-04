@@ -21,7 +21,9 @@ second, step length and foot lift. In the summary also the mean speed at command
 reached (forward m/s, sideways m/s or turn rate), what it does on the other two, and falls.
 
 --verdict judges every run against the first (scripts/finetune.sh): KEEP if it falls no more (calm +2, with
-shoves +3), weaves at most 3 deg more, and is better at something: >= 3 cm/s faster at 0.4 m/s and up, 3 fewer
+shoves +3), weaves at most 3 deg more (no worse) and is better at something; NOT BETTER (no worse) if only the
+first holds (what it was trained for may not show here, e.g. starting from a getup); NOT BETTER (worse)
+otherwise. Better: >= 3 cm/s faster at 0.4 m/s and up, 3 fewer
 falls, 2 deg less weave, or 3 deg less tilt while standing (which may get at most 2 deg worse).
 """
 import argparse
@@ -151,7 +153,8 @@ def verdict(base, new):
     better = (C["calm"]["fast_speed"] >= P["calm"]["fast_speed"] + 0.03 or falls(C) <= falls(P) - 3
               or C["calm"]["weave_deg"] <= P["calm"]["weave_deg"] - 2
               or C["calm"].get("stand_tilt_deg", 0) <= P["calm"].get("stand_tilt_deg", 0) - 3)
-    return (f"{'KEEP' if safe and better else 'NOT BETTER'} (speed at 0.4+ {P['calm']['fast_speed']:.3f} -> "
+    label = "KEEP" if safe and better else "NOT BETTER (no worse)" if safe else "NOT BETTER (worse)"
+    return (f"{label} (speed at 0.4+ {P['calm']['fast_speed']:.3f} -> "
             f"{C['calm']['fast_speed']:.3f} m/s; falls calm {P['calm']['falls']} -> {C['calm']['falls']}, shoves "
             f"{P['shoves']['falls']} -> {C['shoves']['falls']}; weave {P['calm']['weave_deg']:.1f} -> "
             f"{C['calm']['weave_deg']:.1f} deg; standing tilt {P['calm'].get('stand_tilt_deg', 0):.1f} -> "

@@ -48,14 +48,17 @@ def main():
     p.add_argument("--side-deg", type=float, default=90.0)
     p.add_argument("--joint-rad", type=float, default=0.5)
     p.add_argument("--stand-for", type=float, default=0.5, help="s on its feet before the walker takes over")
+    p.add_argument("--at-idle", action="store_true", help="hand over when getup reaches idle (tasks/getup.py) instead")
     p.add_argument("--hold", type=float, default=5.0, help="s the walker must keep it standing")
     p.add_argument("--shove", type=float, default=0.0, help="m/s shove 2 s after the handover, random direction")
     p.add_argument("--video", help="folder for videos of the first 4 robots")
     a = p.parse_args()
 
     gdir = Path(a.getup)
-    weights = json.loads((gdir / "getup.json").read_text())["weights"]
-    start = {"side_deg": a.side_deg, "joint_rad": a.joint_rad, "any_heading": True}
+    saved = json.loads((gdir / "getup.json").read_text())
+    weights = saved["weights"]
+    start = {"side_deg": a.side_deg, "joint_rad": a.joint_rad, "any_heading": True,
+             "knee_min_deg": saved.get("start", {}).get("knee_min_deg")}   # the run's own knee limit, if any
     render = {"render_mode": "rgb_array", "width": 320, "height": 240} if a.video else {}
     g = GetUpEnv(config(8.0, a.physics_from or None).to_dict(), weights, start, **render)
     gm = PPO.load(gdir / "final_model", device="cpu")
@@ -78,7 +81,7 @@ def main():
             obs, *_ = g.step(gm.predict(gn.normalize_obs(obs), deterministic=True)[0])
             if a.video and seed < 4 and i % 2:
                 frames.append(g.render())
-            if g.episode.stood_for >= a.stand_for:
+            if (getattr(g.episode, "idle_for", 0.0) >= 0.5) if a.at_idle else g.episode.stood_for >= a.stand_for:
                 handed = (i + 1) * g.dt
                 break
         if handed is None:

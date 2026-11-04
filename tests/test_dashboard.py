@@ -127,3 +127,26 @@ def test_shutdown_saves_the_walk_log_and_stops_the_server(tmp_path):
     assert list(tmp_path.glob("*.npz")) and not robot.walker.running
     thread.join(timeout=3)
     assert not thread.is_alive()   # serve_forever returned: the dashboard exits
+
+
+def test_getup_then_walker_hands_over_when_upright(tmp_path):
+    """The fake robot is upright, so the getup phase hands over to the walking policy after UP_HOLD_S; a getup
+    policy is refused as a walker, and commands wait until it is up."""
+    import shutil
+
+    from robot import walker as W
+    cal = str(tmp_path / "calibration.json")
+    robot = Robot(fake.hardware(cal), cal)
+    robot.walker.log_dir = str(tmp_path)
+    getups = W.getup_policies()
+    if not getups:
+        pytest.skip("no getup policy exported (scripts/export_getup.py)")
+    time.sleep(0.5)
+    assert "getup policy" in robot.walker.start(f"getup/{getups[0]}")   # never started as a walker
+    assert robot.walker.start_getup(getups[0], POLICY) is None
+    assert robot.walker.phase == "getup" and robot.walker.set_command(0.1, 0, 0)
+    time.sleep(W.UP_HOLD_S + 0.6)
+    assert robot.walker.phase == "walk" and robot.walker.running
+    assert robot.walker.set_command(0.1, 0, 0) is None
+    robot.walker.stop()
+    shutil.rmtree(tmp_path, ignore_errors=True)

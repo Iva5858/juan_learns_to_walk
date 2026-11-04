@@ -37,6 +37,7 @@ class GetUpLog(BaseCallback):
     """Averages over the steps and episodes since the last update, to TensorBoard."""
     def _on_rollout_start(self):
         self.sums, self.n, self.stood, self.episodes = {"upright": 0.0, "height": 0.0, "standing": 0.0, "settled": 0.0}, 0, 0, 0
+        self.idle, self.idle_at = 0, []
 
     def _on_step(self):
         for info, done in zip(self.locals["infos"], self.locals["dones"]):
@@ -46,6 +47,9 @@ class GetUpLog(BaseCallback):
             if done:
                 self.episodes += 1
                 self.stood += info["stood_1s"]
+                self.idle += info["idle_done"]
+                if info["idle_done"]:
+                    self.idle_at.append(info["idle_at"])
         return True
 
     def _on_rollout_end(self):
@@ -53,6 +57,9 @@ class GetUpLog(BaseCallback):
             self.logger.record(f"getup/{k}", v / max(self.n, 1))
         if self.episodes:
             self.logger.record("getup/episodes_stood_1s_pct", 100 * self.stood / self.episodes)
+            self.logger.record("getup/episodes_idle_pct", 100 * self.idle / self.episodes)
+        if self.idle_at:
+            self.logger.record("getup/seconds_to_idle", float(np.median(self.idle_at)))
 
 
 class GetUpVideo(BaseCallback):
@@ -72,16 +79,17 @@ class GetUpVideo(BaseCallback):
         frames, peak_h = [self.env.render()], 0.0
         for i in range(self.env._max_steps):
             action, _ = self.model.predict(norm.normalize_obs(obs), deterministic=True)
-            obs, _, _, truncated, info = self.env.step(action)
+            obs, _, _, truncated, info = self.env.step(action)   # (idle_done: the episode ends there)
             peak_h = max(peak_h, info["height"])
             if i % 2:
                 frames.append(self.env.render())
-            if truncated:
+            if truncated or info["idle_done"]:
                 break
         stood = self.env.episode.best_stood
         self.logger.record("getup/filmed_stood_s", stood)
         self.logger.record("getup/filmed_peak_height", peak_h)
-        name = f"step_{self.num_timesteps // 1000:06d}k_stood{stood:.1f}s.mp4"
+        idle = f"_idle{info['idle_at']:.1f}s" if info["idle_done"] else ""
+        name = f"step_{self.num_timesteps // 1000:06d}k_stood{stood:.1f}s{idle}.mp4"
         imageio.mimsave(self.dir / name, frames, fps=25)
         imageio.mimsave(self.dir / "latest.mp4", frames, fps=25)
         print(f"[video] {name}: peak height {peak_h:.2f} of standing, stood {stood:.1f} s", flush=True)

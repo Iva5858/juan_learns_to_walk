@@ -29,6 +29,8 @@ LINK_STAND_S = 2.0
 LINK_STOP_S = 6.0
 START_TOLERANCE_DEG = 10   # every joint within this of home to start
 START_TILT_DEG = 20        # and the torso within this of upright
+GETUP_TIMEOUT_S = 10.0     # getting up (start_getup): not up by then -> stop and relax
+UP_TILT_DEG, UP_RATE, UP_HOLD_S = 15.0, 1.0, 0.5   # "up": torso within 15 deg, turning under 1 rad/s, for 0.5 s
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLICY_DIR = os.path.join(HERE, "policies")
 LOG_DIR = os.path.join(HERE, "logs")
@@ -42,6 +44,12 @@ PI_FIELDS = ("cpu", "self_cpu", "load", "mem_used_mb", "arm_mhz", "gpu_mhz", "te
 
 def policies():
     return sorted(f[:-4] for f in os.listdir(POLICY_DIR) if f.endswith(".npz")) if os.path.isdir(POLICY_DIR) else []
+
+
+def getup_policies():
+    """The getup policies (robot/policies/getup/, scripts/export_getup.py): never offered as walking policies."""
+    d = os.path.join(POLICY_DIR, "getup")
+    return sorted(f[:-4] for f in os.listdir(d) if f.endswith(".npz")) if os.path.isdir(d) else []
 
 
 def default_policy():
@@ -67,6 +75,8 @@ class Walker:
         self.command_source = None    # who sent the current command
         self.steer_owner = None       # a behavior steering: other sources are refused until it lets go
         self.log_dir = LOG_DIR
+        self.phase = None             # "getup" (start_getup: the getup policy, until up) or "walk"
+        self.next_policy = None       # the walking policy that takes over once up
 
     # ---- from the page ----
     def heartbeat(self):
@@ -75,6 +85,8 @@ class Walker:
     def set_command(self, vx, vy, wz, source="page"):
         if self.ctrl is None:
             return "policy not running"
+        if self.phase == "getup":
+            return "getting up: commands once it is up"
         if self.steer_owner and source != self.steer_owner:
             return f"{self.steer_owner} is steering: stop it first"
         self.command_source = source
@@ -119,14 +131,72 @@ class Walker:
             return "not at home (" + ", ".join(far) + "): press Home first"
         self.ctrl = Controller(policy)
         self.ctrl.start(sensors)
+        if str(policy.meta.get("task", "walk")) == "getup":
+            return f"{name} is a getup policy: use Get up"
         self.policy_name, self.running, self.status = name, True, "running"
         self.command_source, self.steer_owner = None, None
+        self.phase, self.next_policy = "walk", None
         self.heartbeat()
         self.thread = threading.Thread(target=self._loop, daemon=True)
         self.thread.start()
         if self.listener:
             self.listener("start")
         return None
+
+    def start_getup(self, getup_name, walker_name):
+        """From lying (placed face down): the getup policy until the robot is up (UP_*), then the walking
+        policy, commanded to stand. No home or upright check to start, and no tilt stop while getting up;
+        not up within GETUP_TIMEOUT_S -> stop and relax."""
+        if self.running:
+            return "already running"
+        r = self.robot
+        if not r.cal.zero_set:
+            return "not calibrated: set zero first"
+        if r.personality.busy():
+            return "a gesture is playing"
+        if any(BY_NAME[n][1] not in r.bus_of for n in NAMES):
+            return "not all 8 servos found"
+        if any(r.locked(BY_NAME[n][1]) for n in NAMES):
+            return "a servo is locked (too hot)"
+        try:
+            getup = Policy(os.path.join(POLICY_DIR, "getup", getup_name + ".npz"))
+            walker = Policy(os.path.join(POLICY_DIR, walker_name + ".npz"))
+        except (OSError, KeyError, ValueError) as e:
+            return f"can't load: {e}"
+        if str(walker.meta.get("task", "walk")) == "getup":
+            return f"{walker_name} is a getup policy, not a walking one"
+        sensors, why = self._sensors()
+        if sensors is None:
+            return why
+        self.ctrl = Controller(getup)
+        self.ctrl.start(sensors)
+        self.phase, self.next_policy = "getup", walker
+        self.getup_deadline = time.monotonic() + GETUP_TIMEOUT_S
+        self.up_since = None
+        self.policy_name, self.running, self.status = f"{getup_name}+{walker_name}", True, "getting up"
+        self.command_source, self.steer_owner = None, "getup"
+        self.heartbeat()
+        self.thread = threading.Thread(target=self._loop, daemon=True)
+        self.thread.start()
+        if self.listener:
+            self.listener("start")
+        return None
+
+    def _getup_step(self, sensors):
+        """While getting up: hand over to the walking policy once up; give up after GETUP_TIMEOUT_S."""
+        right, fwd = tilt_deg(sensors["gravity_raw"])
+        upright = math.hypot(right, fwd) < UP_TILT_DEG and math.hypot(*sensors["gyro"][:2]) < UP_RATE
+        now = time.monotonic()
+        self.up_since = (self.up_since or now) if upright else None
+        if self.up_since is not None and now - self.up_since >= UP_HOLD_S:
+            self.ctrl = Controller(self.next_policy)
+            self.ctrl.start(sensors)
+            self.phase, self.status, self.steer_owner = "walk", "up: walking policy standing", None
+            return True
+        if now > self.getup_deadline:
+            self.stop("stopped: not up within the getup time", relax=True)
+            return False
+        return True
 
     def stop(self, why="stopped", relax=False):
         was = self.running
@@ -208,7 +278,10 @@ class Walker:
             else:
                 stale = 0
                 right, fwd = tilt_deg(sensors["gravity_raw"])  # the real tilt, whatever the offset
-                if math.hypot(right, fwd) > TILT_RELAX_DEG:
+                if self.phase == "getup":
+                    if not self._getup_step(sensors):
+                        break
+                elif math.hypot(right, fwd) > TILT_RELAX_DEG:
                     self.stop(f"stopped: tilted {math.hypot(right, fwd):.0f} deg (falling): relaxed", relax=True)
                     break
                 quiet = time.monotonic() - self.last_link
@@ -261,5 +334,6 @@ class Walker:
                 "link_s": time.monotonic() - self.last_link, "link_limits": [LINK_STAND_S, LINK_STOP_S],
                 "policies": policies(), "default": default_policy(), "move_ms": self.move_ms, **self.stats,
                 "command_source": self.command_source, "steer_owner": self.steer_owner,
+                "phase": self.phase, "getup_policies": getup_policies(),
                 "ranges": None if self.ctrl is None else {k: np.asarray(self.ctrl.policy.meta[k]).tolist()
                                                           for k in ("forward_range", "lateral_range", "yaw_rate_range")}}

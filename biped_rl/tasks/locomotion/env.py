@@ -18,9 +18,11 @@ import mujoco
 import numpy as np
 from gymnasium import spaces
 
-from biped_rl.robots import resolve_model_path
+from biped_rl.robots import PROJECT, resolve_model_path
 from biped_rl.tasks.locomotion.env_cfg import EnvConfig
 from biped_rl.tasks.locomotion.mdp import commands, curriculums, events, observations, rewards, terminations
+
+START_POOL_STAND_S = 2.0   # s standing still after a start from RandomizationConfig.start_pool
 
 
 @dataclass
@@ -199,6 +201,8 @@ class BipedEnv(gym.Env):
         self.nu = m.nu
 
         self.robot = self._load_robot()
+        pool = cfg.randomization.start_pool
+        self._start_pool = dict(np.load(pool if Path(pool).is_absolute() else PROJECT / pool)) if pool else None
         self.action_scale = np.broadcast_to(np.asarray(cfg.action_scale, dtype=np.float64), (self.nu,)).copy()
         self.smoothness_unit = self.action_scale / (cfg.smoothness_scale or self.action_scale)
         self.servo, self.domain = ServoState(), DomainState()
@@ -457,7 +461,26 @@ class BipedEnv(gym.Env):
         mujoco.mj_forward(self.model, d)
         if cfg.randomization.enabled:
             events.vary_start_state(self)
+        if self._start_pool is not None and not options and rng.uniform() < cfg.randomization.start_pool_prob:
+            return self._start_from_pool()
         return self._start_episode(options or {})
+
+    def _start_from_pool(self):
+        """Start where the getup policy hands over (a random state of RandomizationConfig.start_pool, on this
+        episode's randomized robot): the robot's own heading, servos told to hold home, standing still for
+        START_POOL_STAND_S, then commands as usual."""
+        d, cmd, pool = self.data, self.command, self._start_pool
+        k = int(self.np_random.integers(len(pool["qpos"])))
+        d.qpos[:], d.qvel[:] = pool["qpos"][k], pool["qvel"][k]
+        d.qpos[0:2] = 0.0
+        mujoco.mj_forward(self.model, d)
+        cmd.heading0 = cmd.heading_target = self.yaw()
+        cmd.start_xy = d.qpos[0:2].copy()
+        cmd.ref_xy = cmd.start_xy.copy()
+        _, info = self._start_episode({})
+        cmd.standing, cmd.vec, cmd.stand_since = True, np.zeros(3), 0.0
+        cmd.next_resample = START_POOL_STAND_S
+        return observations.compute(self), info
 
     def _start_episode(self, options):
         """Everything an episode starts with besides the physics: commands, timers, histories. The servos

@@ -25,6 +25,7 @@ from biped_rl.tasks.locomotion.mdp import events, observations
 # hip pitch +-92 deg, knee +-69 deg, ankle +-57 deg around home (clipped to the joint ranges).
 GETUP_ACTION_SCALE = [0.5, 1.6, 1.2, 1.0] * 2
 SETTLE_S = 1.0       # lying still, servos holding straight legs, before the policy takes over
+IDLE_JOINT_SPEED, IDLE_TORSO_RATE, IDLE_JERK, IDLE_HOLD_S = 0.3, 0.3, 0.01, 0.5   # rad/s, rad/s, action^2, s
 
 
 @dataclass
@@ -32,6 +33,9 @@ class GetUpStart:
     side_deg: float = 0.0      # rolled onto a side by up to this (0 = face down, 90 = lying on a side)
     joint_rad: float = 0.0     # each joint bent by up to this from straight (clipped to its range)
     any_heading: bool = False
+    knee_min_deg: float = None     # (a limit, not a start setting) the knees' lower limit (deg): juan_getup_5..19 stood
+                                   # on a knee bent backwards, a stance the walker (knee 17..75 deg) can't continue from
+                                   # and fine-tuning never left; with +5 that stance is impossible
 
 
 @dataclass
@@ -45,6 +49,10 @@ class GetUpWeights:
                                         # (upright 1, lying 0.5, upside down 0): juan_getup_4 stood on its head
                                         # with its legs in the air, its centre of mass higher than kneeling
     standing: float = 3.0      # upright (> 0.85), high (> 0.75) and only the feet on the ground
+    strict_standing: float = 0.0   # 1: standing also needs both feet down and under 0.2 m/s across the floor
+                                   # (juan_getup_9 lunged and bounded on one foot at up to 1.7 m/s: "standing",
+                                   # and no walker could take over). A knee bent backwards is allowed: every
+                                   # getup since juan_getup_5 stands on one, and the walker takes over from it
     feet_only: float = 0.0     # only the feet on the ground, at any height (a squat, not a kneel): the step
                                # between sitting up on folded legs and standing (juan_getup_1 stopped there)
     still: float = 1.0         # while standing: not wobbling (torso roll / pitch rate)
@@ -53,6 +61,26 @@ class GetUpWeights:
                                # so every bit of calming pays: juan_getup_6 had it all-or-nothing (feet under
                                # 0.1 m/s, joints under 0.5 rad/s) and, shuffling at 4 rad/s, never earned any
     action_rate: float = 0.05  # jerky actions (mean squared change per step, in action units)
+    flat_feet: float = 0.0     # 1: standing also needs both soles within 20 deg of flat (juan_getup_12 stood on the
+                               # edge of its left foot, hip + knee + ankle = -90 deg: touching the floor isn't standing)
+    sole_flat: float = 0.0     # while upright on its feet: how flat the soles are (mean of cos^4 of their tilt: 1
+                               # flat, 0.6 at 25 deg, 0 on edge), graded, so turning a foot down pays all the way
+    idle_finish: float = 0.0   # >0: reaching idle ends the episode with this bonus, plus what standing perfectly until
+                               # the time limit would have earned (so finishing early never loses): get to idle fast.
+                               # Idle = standing (with the strict / flat rules in force) with the motors at rest:
+                               # joints under IDLE_JOINT_SPEED, torso turning under IDLE_TORSO_RATE, actions steady,
+                               # held IDLE_HOLD_S. There the walking policy takes over (getup_handover.py)
+    joint_speed: float = 0.0   # while on its feet: joint motion (mean of joint speed^2, rad^2/s^2). juan_getup_13/14
+                               # stood with a steady torso but legs buzzing at 3.5 rad/s rms (right knee 6): jitter
+                               # in sim, wear and heat on the servos, and never idle
+    two_legs: float = 0.0      # while upright on its feet: the lighter-loaded foot's share of the weight (full at 30% or
+                               # more each): juan_getup_15 balanced on its right leg, ankle and knee buzzing, while the
+                               # left foot tapped the floor 17 times a second
+    home_pose: float = 0.0     # while standing: closeness to the home crouch, exp(-rms^2 / 2 (25 deg)^2): 0.23 at 43 deg
+                               # rms (juan_getup_16's stance, a knee reversed), 0.92 at 10 deg; the walker starts from home
+    idle_home_deg: float = 0.0     # >0: idle also needs every joint within this of home (deg)
+    speed: float = 0.0         # moving across the floor (horizontal speed^2, m^2/s^2): getting up happens on the
+                               # spot; juan_getup_9 and 10 bounded about at 0.8 m/s instead of standing
 
 
 def config(episode_seconds=6.0, physics_from=None):
@@ -78,7 +106,25 @@ class GetUpEnv(BipedEnv):
         super().__init__(config, render_mode=render_mode, width=width, height=height)
         self.w = GetUpWeights(**(weights or {}))
         self.start = GetUpStart(**(start or {}))
+        if self.start.knee_min_deg is not None:   # servo targets (and lying poses) clipped to it
+            self.robot.joint_lo[self.robot.knee_idx] = np.radians(self.start.knee_min_deg)
+        self._sole_axis = self._sole_axes()
         self.lying_height = None
+
+    def _sole_axes(self):
+        """Per foot, the axis of its body frame that points up when it stands flat (measured at home)."""
+        self._reset_to_home()
+        mujoco.mj_forward(self.model, self.data)
+        return [int(np.argmax(np.abs(self.data.xmat[b].reshape(3, 3)[2]))) for b in self.robot.foot_bodies]
+
+    def sole_cos(self):
+        """Per foot, the cosine of its sole's tilt from flat (1 = flat)."""
+        return np.array([abs(self.data.xmat[b].reshape(3, 3)[2, a]) for b, a in zip(self.robot.foot_bodies, self._sole_axis)])
+
+    def soles_flat(self, max_deg=20.0):
+        """Both soles within max_deg of parallel to the floor."""
+        up = [abs(self.data.xmat[b].reshape(3, 3)[2, a]) for b, a in zip(self.robot.foot_bodies, self._sole_axis)]
+        return min(up) > np.cos(np.radians(max_deg))
 
     def lie_face_down(self):
         """Legs straight, torso pitched 90 deg nose down, just above the floor; then SETTLE_S lying with
@@ -137,29 +183,51 @@ class GetUpEnv(BipedEnv):
         height = float(np.clip((self.com_height() - self.lying_height) / (robot.home_height - self.lying_height), 0.0, 1.2))
         on_feet = not s.bad_contact and ep.contact.sum() >= 1
         standing = upright > 0.85 and height > 0.75 and on_feet
+        if w.strict_standing:
+            standing = standing and ep.contact.sum() == 2 and np.linalg.norm(self.data.qvel[:2]) < 0.2
+        if w.flat_feet:
+            standing = standing and self.soles_flat()
         wobble = float(np.sum(s.ang_world[:2] ** 2))
         feet_speed = float(np.linalg.norm(s.sole_vel, axis=1).max())   # m/s, the faster sole
         joint_speed = float(np.sqrt(np.mean(s.qd ** 2)))                # rad/s, rms over the joints
         settled = (standing * (0.5 + 0.5 * (ep.contact.sum() == 2))
                    * np.exp(-joint_speed / 2.0) * np.exp(-feet_speed / 0.5))
         jerk = float(np.mean((action - ep.last_action) ** 2))
+        home_dev = np.degrees(np.abs(s.q - robot.home_joint))
+        near_home = float(np.exp(-np.mean(home_dev ** 2) / (2 * 25.0 ** 2)))
         side_up = (1.0 - s.grav[2]) / 2 if w.height_right_side_up else 1.0   # grav[2]: -1 upright, +1 upside down
         terms = {"upright": w.upright * upright * (on_feet if w.upright_on_feet else 1.0), "height": w.height * height * side_up,
                  "standing": w.standing * standing, "still": w.still * standing * np.exp(-wobble),
                  "feet_only": w.feet_only * on_feet * upright, "settled": w.settled * settled,
-                 "action_rate": -w.action_rate * jerk}
+                 "sole_flat": w.sole_flat * on_feet * upright * float(np.mean(self.sole_cos() ** 4)),
+                 "action_rate": -w.action_rate * jerk, "speed": -w.speed * float(np.sum(self.data.qvel[:2] ** 2)),
+                 "joint_speed": -w.joint_speed * on_feet * float(np.mean(s.qd ** 2)),
+                 "home_pose": w.home_pose * standing * near_home,
+                 "two_legs": w.two_legs * on_feet * upright * min(float(s.peak_force.min()) / max(float(s.peak_force.sum()), 1e-6) / 0.3, 1.0)}
         reward = sum(terms.values()) * self.dt
         ep.stood_for = getattr(ep, "stood_for", 0.0) + self.dt if standing else 0.0
         ep.best_stood = max(getattr(ep, "best_stood", 0.0), ep.stood_for)
+        idle = (standing and joint_speed < IDLE_JOINT_SPEED and np.linalg.norm(s.ang_world[:2]) < IDLE_TORSO_RATE
+                and jerk < IDLE_JERK)
+        if w.idle_home_deg:
+            idle = idle and home_dev.max() < w.idle_home_deg
+        ep.idle_for = getattr(ep, "idle_for", 0.0) + self.dt if idle else 0.0
+        finished = bool(w.idle_finish) and ep.idle_for >= IDLE_HOLD_S
+        if finished:   # the bonus, and everything standing perfectly to the time limit would have earned
+            best_rate = (w.upright + 1.2 * w.height + w.standing + w.still + w.feet_only + w.settled + w.sole_flat
+                         + w.home_pose + w.two_legs)
+            reward += w.idle_finish + best_rate * self.dt * max(self._max_steps - ep.steps, 0)
 
         ep.last_action2, ep.last_action, ep.last_qvel = ep.last_action, action, s.qd.copy()
         ep.sensor_buf.append(observations.read_sensors(self))
         ep.action_buf.append(action)
-        truncated = ep.steps >= self._max_steps
+        truncated = ep.steps >= self._max_steps and not finished
         info = {f"rew/{k}": v for k, v in terms.items()}
         info.update({"upright": upright, "height": height, "standing": float(standing), "settled": float(settled),
-                     "stood_1s": float(ep.best_stood >= 1.0), "base_height": self.com_height()})
-        return observations.compute(self), reward, False, truncated, info
+                     "stood_1s": float(ep.best_stood >= 1.0), "base_height": self.com_height(),
+                     "idle": float(idle), "home_rms_deg": float(np.sqrt(np.mean(home_dev ** 2))), "idle_done": float(ep.idle_for >= IDLE_HOLD_S),
+                     "idle_at": ep.t if ep.idle_for >= IDLE_HOLD_S else float("nan")})
+        return observations.compute(self), reward, finished, truncated, info
 
     def weights(self):
         return asdict(self.w)

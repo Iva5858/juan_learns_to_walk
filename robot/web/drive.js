@@ -7,6 +7,8 @@
 import {$, R, battery, call, esc, has, n1, onState} from './core.js';
 
 const RAMP = 0.2;                 // m/s per second while up / down is held
+const DECEL = 0.5;                // m/s per second at most when slowing down or stopping: the robot logs of
+                                  // 2026-11-03 fell 5 times within 0.8 s of an instant stop from 0.4-0.6 m/s
 const PRESETS = [-0.15, -0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
 const DEFAULT_RANGES = {forward_range: [-0.15, 0.6], lateral_range: [-0.15, 0.15], yaw_rate_range: [-0.6, 0.6]};
 const DEAD = 0.15;                // gamepad stick dead zone
@@ -17,7 +19,7 @@ const st = {
   stick: null,                    // {x, y} in -1..1 while the on-screen joystick is held
   pad: null,                      // the same from a gamepad
   turnRate: 0.4, sideSpeed: 0.1, stickHold: false,
-  sent: null, sentAt: 0, last: performance.now(),
+  sent: null, sentAt: 0, last: performance.now(), vxOut: 0,
 };
 
 const ranges = () => (R.S && R.S.walker.ranges) || DEFAULT_RANGES;
@@ -35,6 +37,11 @@ export function build(root) {
           <button class="go" id="dStart">Start</button>
           <button class="danger" id="dStop" title="Esc">Stop (hold)</button>
           <button id="dPickup" title="P: stop, logged as a pickup, not a fall">Pick up</button>
+        </div>
+        <div class="row">
+          <span class="sub">Lying face down:</span>
+          <select id="dGetup" style="flex:1;min-width:0"></select>
+          <button class="go" id="dGetupBtn" title="Getup policy until up, then the walking policy above takes over, standing">Get up</button>
         </div>
         <div class="row">
           <span class="sub">Before starting:</span>
@@ -90,6 +97,8 @@ export function build(root) {
       </div>
       <div class="card sub" style="margin-top:12px" id="dStats"></div>
       <div class="card sub" style="margin-top:12px">
+        Slowing down and stopping (<kbd>Space</kbd>, lower speeds) ease off at 0.5 m/s per second: stopping
+        dead from a fast walk tipped the robot over. <kbd>Esc</kbd> stops the policy at once.
         Keys: <kbd>0</kbd>–<kbd>6</kbd> forward speed (0.1 m/s each), <kbd>Shift</kbd>+<kbd>1</kbd>/<kbd>2</kbd> backward;
         <kbd>↑</kbd><kbd>↓</kbd> held: faster / slower; <kbd>←</kbd><kbd>→</kbd> held: turn; <kbd>,</kbd><kbd>.</kbd> held: sideways;
         <kbd>Space</kbd> stand still; <kbd>Esc</kbd> stop; <kbd>P</kbd> pick up. Gamepad: left stick drives, right stick
@@ -108,6 +117,7 @@ export function build(root) {
   $('dStickHold').onchange = e => { st.stickHold = e.target.checked; };
   $('dMs').onchange = e => call('policy/move_ms', {ms: +e.target.value});
   $('dStart').onclick = start;
+  $('dGetupBtn').onclick = () => { standStill(); call('policy/getup', {getup: $('dGetup').value, walker: $('dPolicy').value}); };
   $('dStop').onclick = () => call('policy/stop');
   $('dPickup').onclick = () => call('policy/stop', {why: 'pickup'});
   $('dBoot').onclick = () => call('boot');
@@ -211,7 +221,12 @@ function command(dt) {
     wz = -drive.x * r.yaw_rate_range[1];
   }
   if (st.pad && st.pad.side) vy = -st.pad.side * r.lateral_range[1];
-  return [round(clamp(vx, r.forward_range)), round(clamp(vy, r.lateral_range)), round(clamp(wz, r.yaw_rate_range))];
+  vx = clamp(vx, r.forward_range);
+  // slow down gently: toward zero no faster than DECEL (speeding up and reversing past zero are not limited)
+  if (Math.abs(vx) < Math.abs(st.vxOut) && Math.sign(vx) !== -Math.sign(st.vxOut))
+    vx = st.vxOut - Math.sign(st.vxOut) * Math.min(Math.abs(st.vxOut - vx), DECEL * dt);
+  st.vxOut = vx;
+  return [round(vx), round(clamp(vy, r.lateral_range)), round(clamp(wz, r.yaw_rate_range))];
 }
 
 function fmt(c) {
@@ -222,6 +237,7 @@ function tick(now) {
   const dt = Math.min(0.1, (now - st.last) / 1000);
   st.last = now;
   const pad = gamepad();
+  if (!running()) st.vxOut = 0;   // the next start begins standing, not easing off an old speed
   const c = command(dt);
   const changed = !st.sent || c.some((v, k) => v !== st.sent[k]);
   if (running() && (changed ? now - st.sentAt > 100 : now - st.sentAt > 250)) {
@@ -282,6 +298,8 @@ onState((S, full) => {
   vitals(S);
   if (full) {
     const sel = $('dPolicy');
+    const gs = $('dGetup'), gp = w.getup_policies || [];
+    if (gs.options.length !== gp.length) gs.innerHTML = gp.map(p => `<option>${esc(p)}</option>`).join('') || '<option value="">no getup policy</option>';
     if (sel.options.length !== w.policies.length) {
       sel.innerHTML = w.policies.map(p => `<option>${esc(p)}</option>`).join('');
       sel.value = w.policy || w.default || w.policies[w.policies.length - 1];
@@ -295,6 +313,7 @@ onState((S, full) => {
   if (w.running) $('dPolicy').value = w.policy;
   $('dPolicy').disabled = w.running;
   $('dStart').disabled = w.running || !w.policies.length || S.mode !== 'idle';
+  $('dGetupBtn').disabled = w.running || !(w.getup_policies || []).length || S.mode !== 'idle';
   for (const id of ['dBoot', 'dHome']) $(id).disabled = S.mode !== 'idle';
   $('dMs').value = w.move_ms;
   const r = w.ranges;

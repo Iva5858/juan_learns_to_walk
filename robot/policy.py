@@ -60,6 +60,9 @@ class Controller:
         self.lo, self.hi = m["joint_lo"], m["joint_hi"]
         self.scale = np.asarray(m["action_scale"], dtype=np.float64)  # rad per unit action, around home
         self.filter_a = float(m["action_filter"])
+        # getup policies (meta task "getup") trained on the raw heading error: lying face down the heading is
+        # ill-defined and flips by ~180 deg with tiny motions, so no cap for them (the observations must match)
+        self.cap_heading = str(m.get("task", "walk")) != "getup"
         self.period, self.period_fast = float(m["gait_period"]), float(m["gait_period_fast"])
         self.fast_speed = float(m["fast_speed"])
         self.command = np.zeros(3)
@@ -102,7 +105,7 @@ class Controller:
         # past +-180 deg the error would wrap and the policy would suddenly turn the other way. In
         # training (pushes and turns) 99.9% of errors are under 108 deg, so this cap changes almost
         # nothing the policy has seen.
-        if abs(yaw_err) > MAX_HEADING_ERROR:
+        if self.cap_heading and abs(yaw_err) > MAX_HEADING_ERROR:
             yaw_err = math.copysign(MAX_HEADING_ERROR, yaw_err)
             self.heading_target = sensors["yaw"] - yaw_err
         return np.concatenate([*frames, self.command, clock, [math.sin(yaw_err), math.cos(yaw_err)]])

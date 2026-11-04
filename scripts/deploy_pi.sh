@@ -41,8 +41,8 @@ ssh "$PI" "set -e; cd $DIR
 
 echo "=== 2/3 models and policies"
 rsync -az robot/models/ "$PI:$DIR/robot/models/"
-rsync -az robot/policies/*.npz "$PI:$DIR/robot/policies/"
-ssh "$PI" "ls $DIR/robot/policies/ | sed 's/^/   /'"
+rsync -az --include='*/' --include='*.npz' --exclude='*' robot/policies/ "$PI:$DIR/robot/policies/"   # with getup/
+ssh "$PI" "cd $DIR/robot/policies && ls *.npz getup/*.npz 2>/dev/null | sed 's/^/   /'"
 
 if [[ ${1:-} == --install ]]; then
     echo "=== 3/3 packages for voice and faces"
