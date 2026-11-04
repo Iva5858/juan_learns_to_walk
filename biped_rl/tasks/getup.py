@@ -79,6 +79,9 @@ class GetUpWeights:
     home_pose: float = 0.0     # while standing: closeness to the home crouch, exp(-rms^2 / 2 (25 deg)^2): 0.23 at 43 deg
                                # rms (juan_getup_16's stance, a knee reversed), 0.92 at 10 deg; the walker starts from home
     idle_home_deg: float = 0.0     # >0: idle also needs every joint within this of home (deg)
+    servo_load: float = 0.0    # servo protection (getup ignored it until juan_getup_22): mean (torque / stall)^2,
+    servo_speed: float = 0.0   # joint speed beyond 80% of the servo's top speed (ratio over 0.8),
+    impact: float = 0.0        # and foot impacts beyond 1.5x body weight (x body weight over 1.5)
     speed: float = 0.0         # moving across the floor (horizontal speed^2, m^2/s^2): getting up happens on the
                                # spot; juan_getup_9 and 10 bounded about at 0.8 m/s instead of standing
 
@@ -202,6 +205,9 @@ class GetUpEnv(BipedEnv):
                  "sole_flat": w.sole_flat * on_feet * upright * float(np.mean(self.sole_cos() ** 4)),
                  "action_rate": -w.action_rate * jerk, "speed": -w.speed * float(np.sum(self.data.qvel[:2] ** 2)),
                  "joint_speed": -w.joint_speed * on_feet * float(np.mean(s.qd ** 2)),
+                 "servo_load": -w.servo_load * float(np.mean((s.peak_tau / self.servo.stall) ** 2)),
+                 "servo_speed": -w.servo_speed * max(float(s.peak_speed_ratio) - 0.8, 0.0),
+                 "impact": -w.impact * max(float(s.peak_force.max()) / robot.weight - 1.5, 0.0),
                  "home_pose": w.home_pose * standing * near_home,
                  "two_legs": w.two_legs * on_feet * upright * min(float(s.peak_force.min()) / max(float(s.peak_force.sum()), 1e-6) / 0.3, 1.0)}
         reward = sum(terms.values()) * self.dt
