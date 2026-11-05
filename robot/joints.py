@@ -32,6 +32,10 @@ BY_NAME = {j[0]: j for j in JOINTS}
 BY_ID = {j[1]: j for j in JOINTS}
 HOME = {j[0]: j[4] for j in JOINTS}
 STRAIGHT = {j[0]: 0.0 for j in JOINTS}
+# The shutdown squat: knees 100 deg, hip and ankle -50 (feet stay flat, as the home crouch). In simulation it
+# lowers the centre of mass from 23 to 19 cm at ~0.15-0.2x stall torque; relaxed there, the robot still tips
+# over (peak body contact 3.3x body weight, vs 4.2x relaxing at home): hold or harness it.
+SQUAT = {n: {"hip_roll": 0.0, "hip_pitch": -50.0, "knee": 100.0, "ankle": -50.0}[n.split("_", 1)[1]] for n in NAMES}
 
 CAL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration.json")
 

@@ -128,7 +128,8 @@ class Walker:
         home = policy.meta["home"]
         far = [n for n, q, h in zip(NAMES, sensors["q"], home) if abs(math.degrees(q - h)) > START_TOLERANCE_DEG]
         if far:
-            return "not at home (" + ", ".join(far) + "): press Home first"
+            pose = "Straight" if not np.any(home) else "Home"
+            return f"not at its start pose ({', '.join(far)}): press {pose} first"
         self.ctrl = Controller(policy)
         self.ctrl.start(sensors)
         if str(policy.meta.get("task", "walk")) == "getup":

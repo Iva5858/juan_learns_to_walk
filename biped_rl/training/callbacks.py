@@ -65,6 +65,8 @@ class TrainingDashboard(BaseCallback):
                 if info["command"] < -0.03:
                     self._backward += (info["forward_velocity"], info["command"])
                 self._add("1_overview/speed_error_mps", info["speed_error"])
+                self._add("1_overview/net_speed_mps", info["net_speed"])
+                self._add("1_overview/feet_sliding_mps", info["slip_speed"])
                 self._add("1_overview/top_speed_command_mps", info["speed_max"])
                 self._add("1_overview/push_strength_mps_avg_direction", info["push_level_mean"])
                 self._add("1_overview/push_strength_mps_weakest_direction", info["push_level_min"])

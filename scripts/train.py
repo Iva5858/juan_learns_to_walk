@@ -102,6 +102,8 @@ def main():
                    "(default 256,128,64; a resumed run keeps its own)")
     p.add_argument("--log-std-init", type=float, help="a new run's starting exploration noise, log of its std in "
                    "action units (default -1.0: std 0.37; scale it with --env action_scale to keep it in radians)")
+    p.add_argument("--init-std-rad", type=float, help="a new run's starting exploration noise in radians, the same for "
+                   "every joint whatever its action range (instead of --log-std-init)")
     p.add_argument("--env", nargs="*", default=[], action="extend", metavar="NAME=VALUE",
                    help="override top-level settings for a new run, e.g. --env action_scale=1.0 (not with --resume: "
                         "a trained policy's action range is changed with scripts/rescale_actions.py)")
@@ -120,7 +122,11 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
     cfg = EnvConfig.load(args.resume) if args.resume else EnvConfig()
     if args.stage:
+        meaning = (cfg.neutral_pose, np.asarray(cfg.action_scale).tolist())
         apply_stage(cfg, args.stage)
+        if args.resume and (cfg.neutral_pose, np.asarray(cfg.action_scale).tolist()) != meaning:
+            raise SystemExit(f"--stage {args.stage} changes what {args.resume}'s actions mean (neutral pose or action "
+                             "range): start it from scratch, or resume a run of the same kind")
     # Overrides last, so the stage's settings don't undo them.
     for group, items in (("rewards", args.reward), ("command", args.command), ("robot", args.robot),
                          ("randomization", args.randomization)):
@@ -129,6 +135,8 @@ def main():
             if not hasattr(getattr(cfg, group), name):
                 raise SystemExit(f"unknown {group} setting: {name}")
             setattr(getattr(cfg, group), name, parse_value(value))
+    if args.init_std_rad is not None and (args.resume or args.log_std_init is not None):
+        raise SystemExit("--init-std-rad is for a new run, instead of --log-std-init")
     if args.log_std_init is not None and args.resume:
         raise SystemExit("--log-std-init is for a new run (a resumed run keeps its noise; see --min-std)")
     if args.actor and args.resume:
@@ -175,6 +183,10 @@ def main():
     else:
         actor = [int(n) for n in args.actor.split(",")] if args.actor else None
         model, env = new_model(cfg, env, tensorboard_log=str(run_dir), actor=actor, log_std_init=args.log_std_init)
+        if args.init_std_rad is not None:
+            scale = np.broadcast_to(np.asarray(cfg.action_scale, dtype=np.float64), model.policy.log_std.shape)
+            with torch.no_grad():
+                model.policy.log_std.copy_(torch.as_tensor(np.log(args.init_std_rad / scale), dtype=model.policy.log_std.dtype))
     if args.seed is not None:
         model.set_random_seed(args.seed)
     eval_env = VecNormalize(eval_env, training=False, norm_reward=False)

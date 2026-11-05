@@ -74,12 +74,13 @@ def stop(robot):
     robot.stop()
 
 
-@action("shutdown", "Shut down dashboard", "system", danger=True, relax=(bool, False),
-        confirm="Shut down the dashboard? The policy stops and its log is saved, then the dashboard exits "
+@action("shutdown", "Shut down dashboard", "system", danger=True,
+        confirm="Shut down the dashboard? The policy stops and its log is saved, the robot squats down and every "
+                "servo relaxes: it may tip over, so hold it or keep it in the harness. Then the dashboard exits "
                 "(start it again on the Pi with python3 -m robot.dashboard).")
-def shutdown(robot, relax):
-    """Stop everything, save the walk log, then exit the dashboard; the servos hold (or relax)."""
-    log = robot.shutdown(relax)
+def shutdown(robot):
+    """Stop everything, save the walk log, squat down, relax every servo, then exit the dashboard."""
+    log = robot.shutdown()
     exit_dashboard = getattr(robot, "exit_dashboard", None)
     if exit_dashboard:
         exit_dashboard()   # after this reply is sent

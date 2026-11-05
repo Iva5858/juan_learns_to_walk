@@ -42,6 +42,19 @@ Each stage is its own run that resumes the previous one (`--stage` and `--resume
 
 Fine-tunes start from a `pushes`-stage policy with a lower learning rate (`--lr 1e-4`); [scripts/finetune.sh](../scripts/finetune.sh) is the whole loop: train with the base recipe, export, and judge against the starting policy (walk test with a KEEP / NOT BETTER verdict, standing shove test). `--reward`, `--command`, `--robot` and `--randomization NAME=VALUE` override any setting for a run. Learning to walk from zero on Juan's model has so far ended in standing still (v8, v9: removed in November 2026, see git history); every policy here descends from one first trained on a simpler placeholder biped.
 
+### The free run (v11): speed from scratch
+Stages `speed` and `speed_physics` ([stages.py](../biped_rl/training/stages.py) `apply_speed_stage`) train a new
+walker for speed only, with nothing that suggests a gait: legs straight at the start and as the zero of the
+actions (`neutral_pose = "straight"`), the full joint range, one "go" command (`go_command`, no speed target, no
+stand), no gait clock. Reward: net centre-of-mass speed over 1 s, no cap (`net_speed`); a fall takes back the
+last second of it (`fall_refund_s`: a dive pays nothing); lifted steps that carry the body (`free_air_time`). Costs:
+only the robot's physical limits (foot slip, overload, back-drive, landings, end stops; the hardware stops stay).
+Style and wear terms are off, for later fine-tunes. Each choice answers an earlier failure: see the docstring.
+[scripts/speed_chain.sh](../scripts/speed_chain.sh) runs `speed`, a gate (net speed on the nominal robot), then
+`speed_physics`; [free_run_test.py](../scripts/analysis/free_run_test.py) judges the results (net speed, falls,
+cadence, lift, landings, torque, knee direction). On the robot: start from straight legs (Straight, not Home);
+any forward command is "go", zero stops (the policy never learned to stand still).
+
 ## Fine-tune recipes
 
 Each one is `FROM=<start> STEPS=<n> ./scripts/finetune.sh v7/<name> <options>`, on top of finetune.sh's base recipe. A run's exact command line is in its `run.json` (from v7_21 on).

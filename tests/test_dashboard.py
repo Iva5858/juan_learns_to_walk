@@ -10,6 +10,7 @@ import pytest
 
 from robot import dashboard, fake
 from robot.body import Robot
+from robot.joints import NAMES
 
 POLICY = "juan_v7_13_straight"   # committed (CI has it)
 
@@ -109,7 +110,9 @@ def test_pages_are_served_and_nothing_else(server):
             urllib.request.urlopen(base + path)
 
 
-def test_shutdown_saves_the_walk_log_and_stops_the_server(tmp_path):
+def test_shutdown_saves_the_walk_log_and_stops_the_server(tmp_path, monkeypatch):
+    from robot import body
+    monkeypatch.setattr(body, "SHUTDOWN_MS", (50, 100, 20))
     cal = str(tmp_path / "calibration.json")
     robot = Robot(fake.hardware(cal), cal)
     robot.walker.log_dir = str(tmp_path)
@@ -150,3 +153,38 @@ def test_getup_then_walker_hands_over_when_upright(tmp_path):
     assert robot.walker.set_command(0.1, 0, 0) is None
     robot.walker.stop()
     shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def _fake_robot(tmp_path, monkeypatch):
+    from robot import body
+    monkeypatch.setattr(body, "SHUTDOWN_MS", (50, 100, 20))
+    cal = str(tmp_path / "calibration.json")
+    robot = Robot(fake.hardware(cal), cal)
+    time.sleep(0.5)   # the first sensor readings
+    return robot
+
+
+def test_shutdown_squats_then_relaxes(tmp_path, monkeypatch):
+    from robot.joints import SQUAT
+    robot = _fake_robot(tmp_path, monkeypatch)
+    moves = []
+    move = robot.move
+    monkeypatch.setattr(robot, "move", lambda name, deg, ms=300, _boot=False: moves.append((name, deg)) or move(name, deg, ms))
+    robot.shutdown()
+    assert [d for n, d in moves[-8:]] == [SQUAT[n] for n in NAMES]
+    assert not any(s["torque"] for s in robot.hw.world.servos.values())
+    assert "squatted" in robot.message
+
+
+def test_shutdown_relaxes_at_once_when_fallen_or_failing(tmp_path, monkeypatch):
+    robot = _fake_robot(tmp_path, monkeypatch)
+    robot.cal.imu_level = (45.0, 0.0)   # the IMU reads 45 deg off its level: lying on its side
+    robot.shutdown()
+    assert "no squat: tilted" in robot.message and not any(s["torque"] for s in robot.hw.world.servos.values())
+
+    robot = _fake_robot(tmp_path, monkeypatch)
+    robot.move(NAMES[0], 0.0)
+    monkeypatch.setattr(robot, "pose", lambda *a, **k: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        robot.shutdown()
+    assert not any(s["torque"] for s in robot.hw.world.servos.values())   # relaxed all the same

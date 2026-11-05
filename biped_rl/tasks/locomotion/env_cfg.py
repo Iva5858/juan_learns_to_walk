@@ -58,6 +58,11 @@ class CommandConfig:
     fast_speed: float = 0.8                 # m/s
     swing_ratio: float = 0.45               # fraction of the cycle each foot is in the air (< 0.5: double support)
     swing_height: float = 0.025             # target sole clearance during swing [m]
+    # Free run (the speed stage): every command is this (forward, sideways, turn rate), never "stand", and
+    # the reward is speed itself (RewardWeights.net_speed). () = off
+    go_command: tuple = ()
+    clock: bool = True                      # the gait clock in the observation; False: always (0, 0), so no
+                                            # rhythm is suggested (the free run finds its own cadence)
 
 
 @dataclass
@@ -92,6 +97,22 @@ class RewardWeights:
     # find its way out of a shuffle (the touchdown terms above pay nothing until a full step happens).
     swing_lift: float = 0.0                 # swing foot's height, linear up to swing_height
     swing_reach: float = 0.0                # swing foot moving in the commanded direction while lifted
+    # Free run (CommandConfig.go_command; 0 = off). Not x tracking: there is no speed to track.
+    net_speed: float = 0.0                  # per m/s of the centre of mass's net progress along the heading over
+                                            # the last net_speed_window_s (no cap; rocking and lunges net ~0)
+    net_speed_window_s: float = 1.0
+    net_speed_slip: float = 0.0             # x the feet's sliding speed on the floor (mean of both feet, same window)
+                                            # taken off the net speed: gliding is not speed (juan_v11_speed: a third
+                                            # of its 0.45 m/s); 0 = off
+    free_air_time: float = 0.0              # per s each foot was really lifted (above lift_height) beyond
+                                            # free_air_min at its touchdown, up to free_air_cap; x the net speed
+                                            # up to free_air_speed (marching in place earns nothing). No clock:
+                                            # against the high-cadence shuffle (juan_v8j), any cadence above it
+    free_air_min: float = 0.1               # s
+    free_air_cap: float = 0.3               # s
+    free_air_speed: float = 0.1             # m/s
+    fall_refund_s: float = 0.0              # s: a fall or hardware stop takes back the net_speed paid over this
+                                            # long before it (a dive forward earns ~0, not +75); 0 = off
     # --- survival ---
     alive: float = 0.2                      # small: survival alone must not be worth standing still for
     termination: float = -10.0              # once, on a fall or a hardware limit
@@ -110,6 +131,8 @@ class RewardWeights:
     base_height: float = 50.0               # centre of mass below its home height [m^2] (no crouch-walking)
     knee_hyperextension: float = 2.0        # knee bent backwards [rad] (no bird-legged gait)
     hip_roll: float = 1.0                   # hip roll away from 0 [rad^2] (no splayed, waddling legs)
+    hip_roll_free_deg: float = 0.0          # ...only beyond this far either way (the sway a gait needs is free;
+                                            # juan_v11 swung each leg out to its 19 deg end stop); 0 = from 0
     hip_roll_inward: float = 5.0            # per rad of inward roll: the 5 deg inward joint limit is a margin,
                                             # not a target (5 deg inward costs ~0.44)
     # smooth motion
@@ -269,6 +292,9 @@ class EnvConfig:
                                     # (None = action_scale): a rescaled policy keeps its smoothness costs
     action_filter: float = 0.5   # EMA on the actions (1 = off); the robot uses the same filter
     history: int = 3             # past sensor frames stacked into the observation
+    # The pose actions, observations and the start are measured from ("home" everywhere in the code):
+    # "home" = the crouch keyframe; "straight" = every joint 0, legs straight (the speed stage: no pose bias).
+    neutral_pose: str = "home"
     episode_seconds: float = 20.0
 
     def to_dict(self):

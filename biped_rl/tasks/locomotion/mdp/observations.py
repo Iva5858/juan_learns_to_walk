@@ -5,7 +5,7 @@ Actor observation, oldest history frame first:
     `history` frames of [gravity in torso frame (3), gyro (3), joint angles - home (nu),
                          0.1 x joint speeds (nu), previous action (nu)]
     command: (forward, sideways, turn rate)
-    gait clock (sin, cos), (0, 0) when standing
+    gait clock (sin, cos), (0, 0) when standing or CommandConfig.clock is off
     heading error (sin, cos)
 Privileged (critic only; zero-filled on the robot):
     path offset, body velocity (3), height below home, foot contacts (2), sole clearances (2),
@@ -68,7 +68,7 @@ def compute(env):
     ph = 2 * np.pi * commands.phase(env)
     k = env.curriculum.difficulty
     yaw_err = commands.heading_error(env) + (env.np_random.normal(0, k * rc.noise_yaw) if rc.enabled and k > 0 else 0.0)
-    clock = [0.0, 0.0] if cmd.standing else [np.sin(ph), np.cos(ph)]  # stopped clock = stand
+    clock = [0.0, 0.0] if cmd.standing or not env.cfg.command.clock else [np.sin(ph), np.cos(ph)]  # stopped clock = stand
     actor = np.concatenate([*history_frames(env), cmd.vec, clock, [np.sin(yaw_err), np.cos(yaw_err)]])
     privileged = np.concatenate([
         [commands.lateral_offset(env)],

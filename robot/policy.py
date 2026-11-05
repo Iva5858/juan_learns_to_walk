@@ -65,11 +65,17 @@ class Controller:
         self.cap_heading = str(m.get("task", "walk")) != "getup"
         self.period, self.period_fast = float(m["gait_period"]), float(m["gait_period_fast"])
         self.fast_speed = float(m["fast_speed"])
+        self.clock = bool(m.get("clock", True))
+        # free-run policies (CommandConfig.go_command) know one command: any move is it, zero is stop
+        go = np.asarray(m.get("go_command", np.zeros(0)), dtype=np.float64)
+        self.go_command = go if go.size else None
         self.command = np.zeros(3)
 
     # ---- commands (the joystick) ----
     def set_command(self, forward, sideways=0.0, turn_rate=0.0):
         self.command = np.array([forward, sideways, turn_rate], dtype=np.float64)
+        if self.go_command is not None:
+            self.command = self.go_command.copy() if np.any(self.command) else np.zeros(3)
 
     @property
     def standing(self):
@@ -99,7 +105,7 @@ class Controller:
         frames = [np.concatenate([self.sensor_buf[-1 - j], self.action_buf[-1 - j]])
                   for j in reversed(range(self.history))]
         ph = 2 * math.pi * (self.phase % 1.0)
-        clock = [0.0, 0.0] if self.standing else [math.sin(ph), math.cos(ph)]
+        clock = [0.0, 0.0] if self.standing or not self.clock else [math.sin(ph), math.cos(ph)]
         yaw_err = (sensors["yaw"] - self.heading_target + math.pi) % (2 * math.pi) - math.pi
         # If the robot falls far behind the commanded turn (slipping feet), the target waits for it:
         # past +-180 deg the error would wrap and the policy would suddenly turn the other way. In

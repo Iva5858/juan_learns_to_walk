@@ -43,6 +43,8 @@ def test_measured_servos():
 
 def test_stages():
     for stage in STAGES:
+        if stage.startswith("speed"):
+            continue  # the free run: tests/test_free_run.py
         cfg = EnvConfig()
         apply_stage(cfg, stage)
         assert cfg.randomization.enabled == (stage in ("physics", "pushes"))

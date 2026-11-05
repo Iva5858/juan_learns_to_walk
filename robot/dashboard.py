@@ -199,13 +199,17 @@ def main():
           + (f" ({robot.cal_path}: the fake robot's own)" if a.fake else ""))
     print(f"Protection:  servos relax above {SERVO_TEMP_LIMIT} C, everything relaxes if the Pi reaches {PI_TEMP_LIMIT} C")
     host = "localhost" if a.fake else socket.gethostname().removesuffix(".local") + ".local"
-    print(f"Dashboard:   http://{host}:{a.port}   (Ctrl+C stops and holds position)")
+    print(f"Dashboard:   http://{host}:{a.port}   (Ctrl+C: squat, relax, exit)")
     try:
         server.serve_forever()
         print("Shut down from the page.")
     except KeyboardInterrupt:
-        robot.stop()
-        print("\nStopped.")
+        print("\nShutting down: squat, then relax (Ctrl+C again: relax at once)")
+        try:
+            robot.shutdown()
+        except KeyboardInterrupt:
+            robot.relax()
+        print(robot.message)
 
 
 if __name__ == "__main__":

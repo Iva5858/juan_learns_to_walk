@@ -131,6 +131,9 @@ class EpisodeState:
     swing_peak: np.ndarray = field(default_factory=lambda: np.zeros(2))  # highest sole clearance since its last contact
     gyro_filtered: np.ndarray = None  # state of the robot-side gyro low-pass (observations.gyro_seen)
     gyro_reading: np.ndarray = None   # the gyro as the robot's controller gets it
+    com_hist: deque = None            # centre-of-mass xy over the last net_speed_window_s (net_speed)
+    slip_hist: deque = None           # the feet's sliding distance on the floor per step, same window
+    speed_paid: deque = None          # net_speed reward paid over the last fall_refund_s
 
 
 CACHE_DIR = Path(__file__).resolve().parents[3] / "out" / "model_cache"
@@ -257,6 +260,9 @@ class BipedEnv(gym.Env):
         self._box_corners = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)], float)
         self._vel6 = np.zeros(6)
         self._home_key = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_KEY, "home")
+        if cfg.neutral_pose not in ("home", "straight"):
+            raise ValueError(f"neutral_pose {cfg.neutral_pose!r}: 'home' or 'straight'")
+        self._key_sole_z = None
         self._reset_to_home()
         robot.home_joint = self.data.qpos[robot.qpos_idx].copy()
         # Height = centre of mass, not the root body's origin: CAD exports often put the base frame
@@ -295,6 +301,13 @@ class BipedEnv(gym.Env):
         else:
             mujoco.mj_resetData(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)
+        if self._key_sole_z is None:
+            self._key_sole_z = self.soles()[0][:, 2].min()
+        if self.cfg.neutral_pose == "straight":  # legs straight, soles where the keyframe has them
+            self.data.qpos[self.robot.qpos_idx] = 0.0
+            mujoco.mj_forward(self.model, self.data)
+            self.data.qpos[2] -= self.soles()[0][:, 2].min() - self._key_sole_z
+            mujoco.mj_forward(self.model, self.data)
 
     def _hip_roll_outward_signs(self):
         """+1 if positive hip roll swings that leg outward, -1 if inward. Measured on the model
@@ -330,6 +343,9 @@ class BipedEnv(gym.Env):
         c, s = np.cos(start_yaw), np.sin(start_yaw)
         turned = (self.yaw() - start_yaw + np.pi) % (2 * np.pi) - np.pi
         return float(c * d[0] + s * d[1]), float(-s * d[0] + c * d[1]), float(np.degrees(turned))
+
+    def com_xy(self):
+        return self.data.subtree_com[self.robot.root, :2].copy()
 
     def com_height(self):
         return float(self.data.subtree_com[self.robot.root][2])
@@ -503,7 +519,10 @@ class BipedEnv(gym.Env):
             last_qvel=d.qvel[robot.dof_idx].copy(), clearance=self.soles()[0][:, 2] - robot.home_sole_z,
             q_hist=deque(maxlen=stride_len), td_hist=deque(maxlen=stride_len),
             next_push=rng.uniform(*cfg.randomization.push_interval),
-            last_action=np.zeros(self.nu), last_action2=np.zeros(self.nu), qd_sign=np.zeros(self.nu))
+            last_action=np.zeros(self.nu), last_action2=np.zeros(self.nu), qd_sign=np.zeros(self.nu),
+            com_hist=deque([self.com_xy()], maxlen=max(1, round(cfg.rewards.net_speed_window_s / self.dt)) + 1),
+            slip_hist=deque(maxlen=max(1, round(cfg.rewards.net_speed_window_s / self.dt))),
+            speed_paid=deque(maxlen=max(1, round(cfg.rewards.fall_refund_s / self.dt))))
         self.curriculum.pending_push = None
         reading = observations.read_sensors(self)
         ep.sensor_buf.extend([reading] * ep.sensor_buf.maxlen)
@@ -516,6 +535,8 @@ class BipedEnv(gym.Env):
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
         s = self._measure(action, self._actuate(action))
         reward, task, pen, penalty = rewards.compute(self, s)
+        if w.fall_refund_s:
+            ep.speed_paid.append(task["net_speed"] * float(np.exp(-penalty)))
 
         impact_bw = s.peak_force.max() / self.robot.weight
         torque_ratio = float((s.peak_tau / cfg.robot.stall_torque).max())
@@ -527,6 +548,8 @@ class BipedEnv(gym.Env):
         terminated = fell or broke
         if terminated:
             reward += w.termination
+            if w.fall_refund_s:  # the progress of a fall is not speed
+                reward -= sum(ep.speed_paid)
         truncated = ep.steps >= self._max_steps
         if terminated or truncated:
             curriculums.update_speed(self, fell=terminated)
@@ -545,7 +568,7 @@ class BipedEnv(gym.Env):
         info = {f"rew/{k}": v for k, v in task.items()}
         info.update({f"pen/{k}": v for k, v in pen.items()})
         info.update({
-            "forward_velocity": s.vx, "command": cvx,
+            "forward_velocity": s.vx, "command": cvx, "net_speed": s.net_vx, "slip_speed": s.slip_v,
             "lateral_velocity": s.vy, "command_lateral": cvy,
             "yaw_rate": s.ang_world[2], "command_yaw_rate": cwz,
             "speed_error": s.speed_error, "penalty_scale": float(np.exp(-penalty)),
@@ -595,6 +618,10 @@ class BipedEnv(gym.Env):
         cmd.ref_xy = cmd.ref_xy + cvy * self.dt * side
         cmd.ref_xy = cmd.ref_xy + ahead * (ahead @ (d.qpos[0:2] - cmd.ref_xy))
         offset = commands.lateral_offset(self)
+        # Net speed of the centre of mass along the target heading over the last net_speed_window_s:
+        # rocking back and forth or throwing the torso forward nets ~0 (juan_v10 counted lunges as speed).
+        ep.com_hist.append(self.com_xy())
+        net_vx = float(np.dot(ep.com_hist[-1] - ep.com_hist[0], (ch, sh))) / (self.dt * max(len(ep.com_hist) - 1, 1))
         qd = d.qvel[robot.dof_idx]
         qacc = (qd - ep.last_qvel) / self.dt
 
@@ -613,6 +640,10 @@ class BipedEnv(gym.Env):
         ep.qd_sign = np.where(sign != 0, sign, ep.qd_sign)
         sole_pos, sole_vel = self.soles()
         ep.clearance = sole_pos[:, 2] - robot.home_sole_z
+        # Sliding: each foot's sole speed while on the floor (loaded, or within 3 mm: as foot_slip), mean of both
+        on_floor = np.maximum(ep.contact, ep.clearance < 0.003)
+        ep.slip_hist.append(float(np.mean(on_floor * np.linalg.norm(sole_vel[:, :2], axis=1))) * self.dt)
+        slip_v = sum(ep.slip_hist) / (self.dt * len(ep.slip_hist))
         # At each touchdown: how long that foot was really lifted (sole above lift_height: an unloaded foot
         # skimming the floor doesn't count), and, if it lifted, how far ahead of the other foot it landed
         # along the target heading (step length; + = ahead). A foot slid forward is not a step.
@@ -632,7 +663,7 @@ class BipedEnv(gym.Env):
         ep.td_hist.append(touchdowns)
         feet_x, feet_y = (R.T @ (d.xpos[robot.foot_bodies[0]] - d.xpos[robot.foot_bodies[1]]))[:2]
         return SimpleNamespace(
-            action=action, cmd=(cvx, cvy, cwz), R=R, grav=grav, vx=vx, vy=vy, yaw_err=yaw_err, offset=offset,
+            action=action, cmd=(cvx, cvy, cwz), R=R, grav=grav, vx=vx, vy=vy, net_vx=net_vx, slip_v=slip_v, yaw_err=yaw_err, offset=offset,
             target_delta=phys.target_delta,
             ang_world=R @ d.qvel[3:6], qd=qd, qacc=qacc, q=q, touchdowns=touchdowns, reversals=reversals,
             sole_vel=sole_vel, swing=swing, bad_contact=bad_contact, new_td=new_td,

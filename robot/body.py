@@ -7,13 +7,14 @@ buses.
 
 The hardware is pluggable: real_hardware() on the Pi, robot.fake.hardware() anywhere else.
 """
+import math
 import threading
 import time
 from collections import deque
 from types import SimpleNamespace
 
 from robot.imu import tilt_deg
-from robot.joints import BY_ID, BY_NAME, CAL_FILE, HOME, NAMES, STRAIGHT, Calibration
+from robot.joints import BY_ID, BY_NAME, CAL_FILE, HOME, NAMES, SQUAT, STRAIGHT, Calibration
 from robot.personality import Personality
 from robot.walker import Walker
 
@@ -22,6 +23,8 @@ PI_TEMP_LIMIT = 75      # deg C: the Pi this hot relaxes every servo
 COOL_MARGIN = 5         # unlock once this many degrees below the limit
 SLOW_EVERY = 8          # bus passes between temperature / voltage / torque reads (one servo per pass)
 BOOT_MS = (2000, 2500)  # boot: to straight legs, then to home
+SHUTDOWN_MS = (1000, 2500, 500)  # shutdown: to home, down into the squat, settle there; then relax
+SHUTDOWN_TILT_DEG = 30           # tilted more (fallen): no squat, relax at once
 
 
 def real_hardware():
@@ -160,23 +163,50 @@ class Robot:
         self.walker.stop("stopped from the page")
         self.all_buses(lambda b: b.stop())
 
-    def shutdown(self, relax=False):
+    def shutdown(self):
         """The stop sequence before the dashboard exits: the walking policy stops and its log is written
         (its loop saves it on the way out: waited for), gestures stop, face greeting and voice listening
-        close, and the servos hold where they are (or relax). Returns the walk log saved, if any."""
+        close; the robot goes to home and down into the deep squat (SQUAT), then every servo relaxes, always:
+        also when the squat can't be done (fallen, a servo missing, locked or uncalibrated) or fails. Returns
+        the walk log saved, if any."""
         was_walking = self.walker.running
-        self.personality.stop()
-        self.walker.stop("stopped: dashboard shut down")
-        if self.walker.thread is not None:
-            self.walker.thread.join(timeout=5.0)
-        self.personality.set_faces(False)
-        self.personality.set_listening(False)
-        if relax:
+        try:
+            self.personality.stop()
+            self.walker.stop("stopped: dashboard shut down")
+            if self.walker.thread is not None:
+                self.walker.thread.join(timeout=5.0)
+            self.personality.set_faces(False)
+            self.personality.set_listening(False)
+            why = self._why_no_squat()
+            if why is None:
+                self.message = "Shutting down: squatting"
+                for pose, ms in ((HOME, SHUTDOWN_MS[0]), (SQUAT, SHUTDOWN_MS[1])):
+                    why = self.pose(pose, ms)
+                    if why:
+                        break
+                    time.sleep(ms / 1000)
+                else:
+                    time.sleep(SHUTDOWN_MS[2] / 1000)
+        finally:
             self.relax()
-        else:
-            self.all_buses(lambda b: b.stop())
-        self.message = "Dashboard shut down" + (": servos relaxed" if relax else ": servos holding")
+        self.message = "Dashboard shut down: squatted, servos relaxed" if why is None else \
+            f"Dashboard shut down: servos relaxed (no squat: {why})"
         return self.walker.stats.get("log") if was_walking else None
+
+    def _why_no_squat(self):
+        if not self.cal.zero_set:
+            return "not calibrated"
+        if any(BY_NAME[n][1] not in self.bus_of for n in NAMES):
+            return "not all 8 servos found"
+        if any(self.locked(BY_NAME[n][1]) for n in NAMES):
+            return "a servo is locked (too hot)"
+        st = self.imu.state
+        if st is None or time.time() - st["t"] > 0.5:
+            return "no IMU reading"
+        lean = math.hypot(*(a - b for a, b in zip(tilt_deg(st["gravity"]), self.cal.imu_level)))
+        if lean > SHUTDOWN_TILT_DEG:
+            return f"tilted {lean:.0f} deg"
+        return None
 
     def busy(self):
         """Why the servos can't be moved from the page right now (None: they can)."""

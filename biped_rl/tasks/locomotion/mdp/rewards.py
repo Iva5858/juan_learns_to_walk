@@ -2,7 +2,7 @@
 and returns the weighted term: f(env, s, w), where s is the step data the environment measured
 (see BipedEnv._measure) and w the weights.
 
-    reward = (alive + tracking * sum(task terms)) * exp(-sum(penalties))  [+ termination]
+    reward = (alive + tracking * sum(task terms) + free-run terms) * exp(-sum(penalties))  [+ termination]
 
 * tracking: how well the speed command is met (1 = exact). Every task term is multiplied by it,
   so heading, rhythm and foot lift only pay while actually moving at the commanded speed.
@@ -86,6 +86,27 @@ def swing_reach(env, s, w):
     return w.swing_reach * float(np.mean(s.swing * lifted * reach))
 
 
+# --------------------------------------------------------------------- free run (not x tracking)
+def net_speed(env, s, w):
+    """Speed itself: the centre of mass's net progress along the heading over the last
+    net_speed_window_s [m/s], no cap, less net_speed_slip x the feet's sliding speed on the floor over the same
+    window (speed from gliding doesn't count). Never negative (the reward stays >= 0)."""
+    return w.net_speed * max(s.net_vx - w.net_speed_slip * s.slip_v, 0.0)
+
+
+def free_air_time(env, s, w):
+    """At each touchdown, how long that foot was really lifted beyond free_air_min, up to free_air_cap
+    [s], scaled by the net speed up to free_air_speed: steps that carry the body forward, at any cadence
+    slower than a shuffle. No gait clock involved."""
+    if w.free_air_time == 0 or not s.new_td.any():
+        return 0.0
+    air = np.clip(s.air_at_touchdown[s.new_td] - w.free_air_min, 0.0, w.free_air_cap - w.free_air_min)
+    return w.free_air_time * float(air.sum()) * float(np.clip(s.net_vx / w.free_air_speed, 0.0, 1.0))
+
+
+FREE_RUN_TERMS = (net_speed, free_air_time)
+
+
 TASK_TERMS = (tracking_vel, tracking_lat_yaw, heading, gait_contact, feet_clearance, step_length, feet_air_time,
               swing_lift, swing_reach)
 
@@ -122,8 +143,8 @@ def knee_hyperextension(env, s, w):
 
 
 def hip_roll(env, s, w):
-    """Hip roll away from 0 [rad^2]: no splayed, waddling legs."""
-    return w.hip_roll * np.sum(s.q[env.robot.hip_roll_idx] ** 2)
+    """Hip roll away from 0 [rad^2], beyond hip_roll_free_deg either way: no splayed, waddling legs."""
+    return w.hip_roll * np.sum(np.maximum(np.abs(s.q[env.robot.hip_roll_idx]) - np.radians(w.hip_roll_free_deg), 0.0) ** 2)
 
 
 def hip_roll_inward(env, s, w):
@@ -312,6 +333,7 @@ def compute(env, s):
     env.episode.speed_err_sum += np.sqrt(err2)
 
     task = {f.__name__: s.tracking * f(env, s, w) for f in TASK_TERMS}
+    task.update({f.__name__: f(env, s, w) for f in FREE_RUN_TERMS})
     pen = {f.__name__: f(env, s, w) for f in PENALTY_TERMS}
     s.recovering = (env.episode.t - env.episode.last_push < 1.0
                     or np.linalg.norm(s.grav[:2]) > np.sin(np.radians(w.recover_tilt_deg)))

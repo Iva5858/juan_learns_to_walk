@@ -30,14 +30,15 @@ export function build(root) {
           x &gt; 0, nose down y &gt; 0, turning left z &gt; 0.</div></details></div>
     <div class="card"><h3>Voice, faces, camera</h3><div class="kv" id="sExtras"></div></div>
     <div class="card"><h3>System</h3>
-      <div class="row"><button class="danger" id="sShutdown">Shut down dashboard</button>
-        <label class="sub"><input type="checkbox" id="sShutRelax"> relax the servos (else they hold)</label></div>
-      <div class="sub">Stops the walking policy and saves its log, stops gestures, faces and voice, then exits the
-        dashboard. Start it again on the Pi: <kbd>python3 -m robot.dashboard</kbd>.</div>
+      <div class="row"><button class="danger" id="sShutdown">Shut down dashboard</button></div>
+      <div class="sub">Stops the walking policy and saves its log, stops gestures, faces and voice, squats down
+        (~4 s) and relaxes every servo, then exits the dashboard. Relaxed, it can still tip over: hold it or keep the
+        harness on. Fallen, it relaxes at once. Start it again on the Pi: <kbd>python3 -m robot.dashboard</kbd>.</div>
       <div class="sub" id="sShutNote"></div></div>
   </div>`;
   $('sShutdown').onclick = async () => {
-    const r = await call('shutdown', {relax: $('sShutRelax').checked});
+    $('sShutNote').textContent = 'Squatting, then relaxing…';
+    const r = await call('shutdown');
     if (!r.error) $('sShutNote').textContent = 'Dashboard shut down' + (r.log ? `; walk log saved: ${r.log}` : '') + '.';
   };
   $('sZeroGyro').onclick = () => call('cal/zero_gyro');

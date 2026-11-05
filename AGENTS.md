@@ -87,6 +87,8 @@ the shove test, and writes `runs/logs/<name>_report.txt`.
   `juan_getup_23` = gentler on the servos); not yet on randomized robots, not yet tried on hardware. It ends in a
   ~24 cm lunge; the walker takes over and squares the feet (robot: Drive tab, "Get up"). History of what failed and
   why: the getup docstrings and `docs/experiments-2026-11.md`.
+- **Speed from scratch (v11, Nov 5):** the free run (docs/training.md#the-free-run-v11-speed-from-scratch):
+  `scripts/speed_chain.sh`, judged by `scripts/analysis/free_run_test.py`. Pilot pending.
 - **Dashboard:** robot/web (tabs Drive, Actions, Status, Setup); old page at `/classic`.
 
 ## Talking to the robot
