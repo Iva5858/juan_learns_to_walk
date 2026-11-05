@@ -21,7 +21,8 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines3.common.utils import set_random_seed
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecCheckNan, VecNormalize
 
 from biped_rl.runs import RUNS, check_name, start_record, write_record
 from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
@@ -33,6 +34,7 @@ from biped_rl.training.callbacks import (
     TrainingDashboard,
     VideoRecorder,
 )
+from biped_rl.training.guards import RuntimeGuards
 from biped_rl.training.ppo import n_steps_for, new_model
 from biped_rl.training.stages import STAGES, apply_stage, load_curriculum, save_curriculum
 
@@ -49,6 +51,12 @@ def parse_value(text):
         return text
 
 
+def evaluation_env(cfg, runtime_guards=False):
+    """Match the training wrapper stack: SB3 walks both stacks when copying normalization."""
+    env = DummyVecEnv([lambda: Monitor(BipedEnv(cfg.to_dict()))])
+    return VecCheckNan(env, raise_exception=True, check_inf=True) if runtime_guards else env
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--run-name", required=True, help="<generation>/<name>, e.g. v7/juan_v7_21_speed (docs/runs.md)")
@@ -57,13 +65,19 @@ def main():
     p.add_argument("--n-envs", type=int, default=2 * os.cpu_count(),
                    help="simulation workers (default 2 x cores: 36 on this Mac was 43%% faster than 18)")
     p.add_argument("--resume", help="run directory to continue from (fine-tuning / curriculum)")
+    p.add_argument("--seed", type=int, help="explicit training seed (use the same seed for matched pilot arms)")
+    p.add_argument("--deadline-monotonic", type=float, help="stop learning gracefully at this local monotonic-clock deadline")
+    p.add_argument("--min-std-rad", type=float, help="keep raw exploration std above this physical radian floor")
+    p.add_argument("--runtime-guards", action="store_true", help="check finite data/parameters and write a 30-second heartbeat")
     p.add_argument("--min-std", type=float, default=0.1,
                    help="with --resume and --stage: raise the policy's exploration noise to at least this "
                         "(it shrinks during training; a new stage needs room to try new movements). In action units: "
                         "0.1 = ~3 deg at the 0.5 rad action scale")
     p.add_argument("--stage", choices=STAGES, help="training stage (see apply_stage); with --resume for "
                    "all but the first")
-    p.add_argument("--video-every", type=int, default=1_000_000, help="steps between walking clips")
+    p.add_argument("--video-every", type=int, default=1_000_000, help="steps between walking clips; 0 disables rendering")
+    p.add_argument("--eval-every", type=int, default=1_000_000, help="steps between automatic training evaluations")
+    p.add_argument("--eval-episodes", type=int, default=10, help="episodes per automatic training evaluation")
     p.add_argument("--video", choices=("walk", "stand"), default="walk",
                    help="what the clips show: walking, or stopping and being shoved while standing")
     p.add_argument("--tb-video", action="store_true", help="also put the clips in TensorBoard (~100 MB per run)")
@@ -92,6 +106,12 @@ def main():
                    help="override top-level settings for a new run, e.g. --env action_scale=1.0 (not with --resume: "
                         "a trained policy's action range is changed with scripts/rescale_actions.py)")
     args = p.parse_args()
+    if args.timesteps <= 0 or args.n_envs <= 0 or args.video_every < 0 or args.eval_every <= 0 or args.eval_episodes <= 0:
+        p.error("timesteps, n-envs and evaluation settings must be positive; video-every must be nonnegative")
+    if args.seed is not None:
+        set_random_seed(args.seed)
+    if any(v is not None and (not np.isfinite(v) or v <= 0) for v in (args.deadline_monotonic, args.min_std_rad)):
+        p.error("deadline-monotonic and min-std-rad must be positive and finite")
 
     check_name(args.run_name)
     run_dir = RUNS / args.run_name
@@ -124,8 +144,10 @@ def main():
     start_record(run_dir, args)
 
     env_kwargs = {"config": cfg.to_dict()}
-    env = make_vec_env("biped_rl:Biped-v0", n_envs=args.n_envs, seed=0,
+    env = make_vec_env("biped_rl:Biped-v0", n_envs=args.n_envs, seed=args.seed if args.seed is not None else 0,
                        vec_env_cls=SubprocVecEnv, env_kwargs=env_kwargs)
+    if args.runtime_guards:
+        env = VecCheckNan(env, raise_exception=True, check_inf=True)
     # Eval on the same randomized env (including pushes): measures robustness, not a best case.
     # With pushes on, evaluation uses the fixed standard test instead of the curriculum (random shoves
     # up to 0.3 m/s per axis), so stages and runs are comparable.
@@ -134,7 +156,7 @@ def main():
         eval_cfg.randomization.push_curriculum = False
         eval_cfg.randomization.push_velocity = 0.3
     eval_cfg.randomization.physics_curriculum = False  # evaluation: the full-difficulty robot
-    eval_env = DummyVecEnv([lambda: Monitor(BipedEnv(eval_cfg.to_dict()))])
+    eval_env = evaluation_env(eval_cfg, args.runtime_guards)
 
     if args.resume:
         env = VecNormalize.load(str(Path(args.resume) / "vecnormalize.pkl"), env)
@@ -153,20 +175,26 @@ def main():
     else:
         actor = [int(n) for n in args.actor.split(",")] if args.actor else None
         model, env = new_model(cfg, env, tensorboard_log=str(run_dir), actor=actor, log_std_init=args.log_std_init)
+    if args.seed is not None:
+        model.set_random_seed(args.seed)
     eval_env = VecNormalize(eval_env, training=False, norm_reward=False)
 
     curriculum = CurriculumSnapshot()
     callbacks = [
         curriculum,
         TrainingDashboard(cfg, log_details=args.log_details),
-        VideoRecorder(cfg, run_dir / "videos", freq=args.video_every, mode=args.video, shove=args.video_shove,
-                      tensorboard=args.tb_video),
         CheckpointCallback(save_freq=max(2_000_000 // args.n_envs, 1),
                            save_path=str(run_dir / "checkpoints"), save_vecnormalize=True),
-        EvalCallback(eval_env, n_eval_episodes=10, eval_freq=max(1_000_000 // args.n_envs, 1),
+        EvalCallback(eval_env, n_eval_episodes=args.eval_episodes, eval_freq=max(args.eval_every // args.n_envs, 1),
                      best_model_save_path=str(run_dir), log_path=str(run_dir), deterministic=True,
                      callback_on_new_best=SaveVecNormalize(str(run_dir / "best_vecnormalize.pkl"))),
     ]
+    if args.runtime_guards or args.deadline_monotonic is not None or args.min_std_rad is not None:
+        callbacks.insert(0, RuntimeGuards(cfg.action_scale, args.deadline_monotonic, args.min_std_rad,
+                                         run_dir / "progress.json" if args.runtime_guards else None))
+    if args.video_every:
+        callbacks.append(VideoRecorder(cfg, run_dir / "videos", freq=args.video_every, mode=args.video, shove=args.video_shove,
+                                       tensorboard=args.tb_video))
     if args.speed_ramp:
         start, end = (float(v) for v in args.speed_ramp.split(","))
         callbacks.append(SpeedRamp(start, end, args.timesteps))
@@ -184,6 +212,7 @@ def main():
         # flush: stdout is often redirected to a log; after Ctrl+C the workers may hang on close
         print(f"Saved policy and normalization stats to {run_dir} (safe to Ctrl+C again)", flush=True)
         env.close()
+        eval_env.close()
 
 
 if __name__ == "__main__":

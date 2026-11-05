@@ -2,6 +2,9 @@
 
 Everything in [robot/](../robot/) runs on the Pi and needs only `pyserial`, `smbus2` and `numpy` (plus `python3-picamera2`), not the training stack. Setup and first power-on, step by step: [bringup.md](bringup.md).
 
+Paused SD-card recovery, saved images and the exact resume procedure:
+[Pi recovery handoff](pi-recovery.md). Read it before resuming deployment on the affected card.
+
 ```bash
 # on the Pi, once
 sudo apt install python3-serial python3-smbus2 python3-numpy python3-picamera2 i2c-tools alsa-utils espeak-ng

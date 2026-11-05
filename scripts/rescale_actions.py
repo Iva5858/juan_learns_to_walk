@@ -3,7 +3,8 @@
 The policy's action is an offset from the home pose, `action_scale` rad per unit: with 0.5 every joint
 reaches only +-28.6 deg around home. Raising the scale outright would make a trained policy move
 1.6x too far. Instead, everything expressed in action units is converted, so the new run starts out
-behaving exactly like the old one and can then learn to use the extra range:
+preserving its unclipped mean targets and can then learn to use the extra range.
+Clipping can change the motion: compare closed-loop behavior before training.
 
   * the network's action outputs (last layer) and its exploration noise are scaled by old/new;
   * the previous actions it observes keep their normalized values (their running mean and
@@ -32,20 +33,21 @@ from biped_rl.tasks.locomotion import BipedEnv, EnvConfig
 from robot.joints import NAMES
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("run")
-    p.add_argument("out")
-    p.add_argument("--scale", type=float, required=True, help="new action_scale [rad per unit action]")
-    p.add_argument("--joints", nargs="+", help="only these joints, e.g. hip_pitch knee ankle (default: all)")
-    a = p.parse_args()
-    src, out = Path(a.run), Path(a.out)
+def rescale(run, destination, scale, joints=None, min_std_rad=None):
+    """Create a separate initialization; optionally reopen exploration in physical target units."""
+    src, out = Path(run), Path(destination)
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("scale must be finite and positive")
+    if min_std_rad is not None and (not np.isfinite(min_std_rad) or min_std_rad <= 0):
+        raise ValueError("min_std_rad must be finite and positive")
+    if out.exists():
+        raise FileExistsError(f"choose a new destination: {out}")
     cfg = EnvConfig.load(src)
     old = np.broadcast_to(np.asarray(cfg.action_scale, dtype=np.float64), (len(NAMES),))
-    unknown = set(a.joints or ()) - {n.split("_", 1)[1] for n in NAMES}
+    unknown = set(joints or ()) - {n.split("_", 1)[1] for n in NAMES}
     if unknown:
         raise SystemExit(f"unknown joints {sorted(unknown)}: joints are {NAMES} without left_/right_")
-    new = np.array([a.scale if a.joints is None or n.split("_", 1)[1] in a.joints else s for n, s in zip(NAMES, old)])
+    new = np.array([scale if joints is None or n.split("_", 1)[1] in joints else s for n, s in zip(NAMES, old)])
     r = old / new  # old / new: the same radians in the new units
     out.mkdir(parents=True, exist_ok=True)
 
@@ -56,6 +58,9 @@ def main():
         pol.action_net.weight.mul_(rt[:, None])
         pol.action_net.bias.mul_(rt)
         pol.log_std.add_(torch.log(rt))
+        if min_std_rad is not None:
+            floor = torch.as_tensor(np.log(min_std_rad / new), dtype=pol.log_std.dtype)
+            pol.log_std.copy_(torch.maximum(pol.log_std, floor))
     model.save(out / "final_model")
 
     norm = VecNormalize.load(str(src / "vecnormalize.pkl"), DummyVecEnv([lambda: BipedEnv(cfg.to_dict())]))
@@ -66,6 +71,7 @@ def main():
         norm.obs_rms.mean[act] *= r
         norm.obs_rms.var[act] *= r * r
     norm.save(str(out / "vecnormalize.pkl"))
+    norm.close()
 
     cfg.smoothness_scale = cfg.smoothness_scale or float(old.max())
     cfg.action_scale = float(new[0]) if np.all(new == new[0]) else new.round(6).tolist()
@@ -73,7 +79,18 @@ def main():
     if (src / "curriculum.json").exists():
         shutil.copy(src / "curriculum.json", out / "curriculum.json")
     print(f"{src} -> {out}: action_scale {old.tolist()} -> {cfg.action_scale} rad "
-          f"(reach up to +-{math.degrees(a.scale):.1f} deg around home); outputs x{r.round(4).tolist()}")
+          f"(reach up to +-{math.degrees(scale):.1f} deg around home); outputs x{r.round(4).tolist()}")
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("run")
+    p.add_argument("out")
+    p.add_argument("--scale", type=float, required=True, help="new action_scale [rad per unit action]")
+    p.add_argument("--joints", nargs="+", help="only these joints, e.g. hip_pitch knee ankle (default: all)")
+    p.add_argument("--min-std-rad", type=float, help="initial exploration floor in radians, before filtering/clipping")
+    a = p.parse_args()
+    rescale(a.run, a.out, a.scale, a.joints, a.min_std_rad)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,12 @@ fi
 
 echo "=== 1/3 code: $BRANCH on $PI:$DIR"
 ssh "$PI" "set -e; cd $DIR
+    # Stop before touching calibration or policies if the Pi's Git database is damaged.
+    if ! git fsck --full --no-dangling; then
+        echo 'Pi Git integrity check failed; calibration and policies have not been touched.' >&2
+        echo 'On the Mac: python3 scripts/repair_pi_git.py <full corrupt object ID>' >&2
+        exit 1
+    fi
     # The Pi's own calibration: kept in ~/juan_calibration/ (one copy per deploy, never overwritten) and
     # put back whatever happens, a failed pull included
     mkdir -p ~/juan_calibration; CAL=~/juan_calibration/calibration_\$(date +%Y%m%d_%H%M%S).json

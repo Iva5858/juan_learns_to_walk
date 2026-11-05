@@ -286,6 +286,10 @@ class BipedEnv(gym.Env):
         m.jnt_actfrclimited[joint_ids] = 0
 
     def _reset_to_home(self):
+        # Episode randomization changes mass, inertia, CoM and armature. mj_forward alone
+        # leaves derived model constants (including subtree mass) stale. mj_setConst uses
+        # data as scratch space, so reset data immediately afterwards. Getup uses this too.
+        mujoco.mj_setConst(self.model, self.data)
         if self._home_key >= 0:
             mujoco.mj_resetDataKeyframe(self.model, self.data, self._home_key)
         else:
@@ -414,6 +418,7 @@ class BipedEnv(gym.Env):
         overload, overspeed, peak_tau = np.zeros(self.nu), np.zeros(self.nu), np.zeros(self.nu)
         peak_speed_ratio = 0.0
         xy_before = d.qpos[0:2].copy()
+        target_before = ep.target.copy()
         for k in range(self.frame_skip):  # (plain ufuncs: this loop dominates the step time)
             if k == sv.latency_steps:
                 ep.target = new_target
@@ -435,7 +440,8 @@ class BipedEnv(gym.Env):
         return SimpleNamespace(peak_force=peak_force, saturated=saturated, overload=overload, overspeed=overspeed,
                                peak_tau=peak_tau, peak_speed_ratio=peak_speed_ratio,
                                loaded_overspeed=loaded_overspeed, xy_before=xy_before,
-                               energy=power.sum() * m.opt.timestep, load=np.mean(tau_sq / stall ** 2))
+                               energy=power.sum() * m.opt.timestep, load=np.mean(tau_sq / stall ** 2),
+                               target_delta=float(np.sqrt(np.mean((ep.target - target_before) ** 2))))
 
     # ------------------------------------------------------------------ gym API
     def reset(self, *, seed=None, options=None):
@@ -554,6 +560,9 @@ class BipedEnv(gym.Env):
             "broke": float(broke), "fell": float(fell and not broke),
             "action_delta": np.mean(np.abs(action - ep.last_action2)),
             "base_height": self.com_height(),
+            "load_fraction": float(s.load / self.frame_skip),
+            "joint_reversals": s.reversals,
+            "target_delta_rad": s.target_delta,
             "push_level_mean": float(self.curriculum.push_level.mean()),
             "push_level_min": float(self.curriculum.push_level.min()),
             "physics_difficulty": self.curriculum.difficulty,
@@ -624,6 +633,7 @@ class BipedEnv(gym.Env):
         feet_x, feet_y = (R.T @ (d.xpos[robot.foot_bodies[0]] - d.xpos[robot.foot_bodies[1]]))[:2]
         return SimpleNamespace(
             action=action, cmd=(cvx, cvy, cwz), R=R, grav=grav, vx=vx, vy=vy, yaw_err=yaw_err, offset=offset,
+            target_delta=phys.target_delta,
             ang_world=R @ d.qvel[3:6], qd=qd, qacc=qacc, q=q, touchdowns=touchdowns, reversals=reversals,
             sole_vel=sole_vel, swing=swing, bad_contact=bad_contact, new_td=new_td,
             air_at_touchdown=air_at_touchdown, step_at_touchdown=step_at_touchdown,

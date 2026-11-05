@@ -2,6 +2,8 @@
 
 How the simulated Juan, the task and the training work, and the tools to evaluate a policy. Start with the [README](../README.md).
 
+Experiments that didn't become the main line (wider joint range pilot, speed from scratch): [experiments-2026-11.md](experiments-2026-11.md).
+
 ## The simulated robot
 - **Hobby servos, not ideal motors.** Each joint is a PD controller with a linear torque-speed curve, command delay, gear slack and a zero-calibration error ([env.py](../biped_rl/tasks/locomotion/env.py)). The numbers are in [robots/juan.py](../biped_rl/robots/juan.py). The real servos were fitted from walking logs ([scripts/analysis/replay.py](../scripts/analysis/replay.py)): stiffer and slower to react than the training default (kp ~30 vs 15, 70–90 ms vs 25–59 ms). `EnvConfig.use_measured_servos()` switches to them, and the analysis scripts test on them by default.
 - **Actions** are servo target offsets from a crouched home pose (0.5 rad per unit), smoothed (`filtered = 0.5·action + 0.5·filtered`), at 50 Hz.

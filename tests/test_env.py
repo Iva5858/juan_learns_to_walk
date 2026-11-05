@@ -91,6 +91,24 @@ def test_physics_difficulty_zero_is_the_nominal_robot():
     assert not np.allclose(env.servo.kp, r.kp)  # the full ranges at 1
 
 
+def test_randomized_mass_constants_and_com_are_consistent():
+    """CoM-based balance rewards must use this episode's masses, including after returning to nominal."""
+    cfg = EnvConfig()
+    cfg.randomization.physics_curriculum = False
+    env = BipedEnv(cfg)
+    try:
+        for randomized, seed in ((True, 3), (True, 17), (False, 3)):
+            cfg.randomization.enabled = randomized
+            env.reset(seed=seed)
+            m, d, root = env.model, env.data, env.robot.root
+            total = m.body_mass.sum()
+            expected = np.sum(m.body_mass[:, None] * d.xipos, axis=0) / total
+            assert np.isclose(m.body_subtreemass[root], total)
+            np.testing.assert_allclose(d.subtree_com[root], expected, atol=1e-12)
+    finally:
+        env.close()
+
+
 def test_physics_stage_starts_easy_after_a_stage_without_the_curriculum(tmp_path):
     from biped_rl.training.stages import load_curriculum
     cfg = EnvConfig()
