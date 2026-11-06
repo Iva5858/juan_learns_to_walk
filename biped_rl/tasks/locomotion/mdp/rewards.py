@@ -104,7 +104,16 @@ def free_air_time(env, s, w):
     return w.free_air_time * float(air.sum()) * float(np.clip(s.net_vx / w.free_air_speed, 0.0, 1.0))
 
 
-FREE_RUN_TERMS = (net_speed, free_air_time)
+def swing_knee(env, s, w):
+    """Each foot off the floor: its knee bent (either direction) up to swing_knee_deg, as a fraction, mean of both
+    feet, scaled by the net speed up to free_air_speed: a bent swing leg that carries the body forward."""
+    if w.swing_knee == 0:
+        return 0.0
+    bend = np.clip(np.abs(s.q[env.robot.knee_idx]) / np.radians(w.swing_knee_deg), 0.0, 1.0)
+    return w.swing_knee * float(np.mean((env.episode.contact == 0) * bend)) * float(np.clip(s.net_vx / w.free_air_speed, 0.0, 1.0))
+
+
+FREE_RUN_TERMS = (net_speed, free_air_time, swing_knee)
 
 
 TASK_TERMS = (tracking_vel, tracking_lat_yaw, heading, gait_contact, feet_clearance, step_length, feet_air_time,

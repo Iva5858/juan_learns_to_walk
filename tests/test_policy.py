@@ -47,9 +47,9 @@ def test_export_matches_the_shipped_robot_policy(tmp_path):
     out = tmp_path / f"{CHECKPOINT.name}.npz"
     load_script("export_policy.py").export(CHECKPOINT, out)  # raises if numpy and PyTorch disagree
     exported, shipped = np.load(out), np.load(PROJECT / "robot" / "policies" / out.name)
-    added = {"meta_clock", "meta_go_command"}  # free-run settings, newer than the shipped policy (defaults = its behaviour)
+    added = {"meta_clock", "meta_go_command", "meta_go_turn_range"}  # free-run settings, newer than the shipped policy (defaults = its behaviour)
     assert set(exported.files) - added == set(shipped.files)
-    assert exported["meta_clock"] and exported["meta_go_command"].size == 0
+    assert exported["meta_clock"] and exported["meta_go_command"].size == 0 and exported["meta_go_turn_range"].size == 0
     for k in shipped.files:
         if k in ("meta_joint_lo", "meta_joint_hi"):
             continue  # today's simulator ranges, not the ones it shipped with (the safe policies stay as they are)

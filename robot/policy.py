@@ -69,13 +69,18 @@ class Controller:
         # free-run policies (CommandConfig.go_command) know one command: any move is it, zero is stop
         go = np.asarray(m.get("go_command", np.zeros(0)), dtype=np.float64)
         self.go_command = go if go.size else None
+        turn = np.asarray(m.get("go_turn_range", np.zeros(0)), dtype=np.float64)
+        self.go_turn = turn if turn.size else None   # a free run that learned steering: the turn rate passes through
         self.command = np.zeros(3)
 
     # ---- commands (the joystick) ----
     def set_command(self, forward, sideways=0.0, turn_rate=0.0):
         self.command = np.array([forward, sideways, turn_rate], dtype=np.float64)
         if self.go_command is not None:
-            self.command = self.go_command.copy() if np.any(self.command) else np.zeros(3)
+            go = self.go_command.copy()
+            if self.go_turn is not None:
+                go[2] = min(max(turn_rate, self.go_turn[0]), self.go_turn[1])
+            self.command = go if np.any(self.command) else np.zeros(3)
 
     @property
     def standing(self):

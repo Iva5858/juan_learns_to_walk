@@ -14,7 +14,7 @@ def reset(env, options):
     if "stand" in options:
         cmd.standing, cmd.vec = bool(options["stand"]), np.zeros(3)
     elif cfg.go_command:  # the free run: one command, whatever a test or a clip asks for (it knows no other)
-        cmd.vec = np.array(cfg.go_command, dtype=float)
+        cmd.vec = go_vec(env, options["command"][2] if "command" in options else None)
     elif "command" in options:
         cmd.vec = np.array(options["command"], dtype=float)
     elif "speed" in options:
@@ -32,7 +32,7 @@ def sample(env):
     share each only turns, only walks backward, or only walks sideways."""
     c, rng, cmd = env.cfg.command, env.np_random, env.command
     if c.go_command:
-        cmd.standing, cmd.vec = False, np.array(c.go_command, dtype=float)
+        cmd.standing, cmd.vec = False, go_vec(env)
         return
     was_standing = cmd.standing
     cmd.standing = bool(rng.uniform() < c.stand_prob)
@@ -63,6 +63,17 @@ def sample(env):
     cmd.max_forward = max(cmd.max_forward, cmd.forward)
 
 
+def go_vec(env, turn_rate=None):
+    """The free run's command: go_command, with turn_rate (given, or drawn from go_turn_range when it is set)."""
+    c = env.cfg.command
+    vec = np.array(c.go_command, dtype=float)
+    if turn_rate is None and c.go_turn_range:
+        turn_rate = env.np_random.uniform(*c.go_turn_range)
+    if turn_rate is not None and c.go_turn_range:
+        vec[2] = float(np.clip(turn_rate, *c.go_turn_range))
+    return vec
+
+
 def resample(env):
     """A new command every few seconds: the policy must change gait, turn, stop and
     start again mid-walk, like with a joystick."""
@@ -76,9 +87,8 @@ def set_command(env, forward, sideways=0.0, turn_rate=0.0):
     """Change the command mid-episode (keyboard, joystick). All zero = stand still."""
     cmd = env.command
     cmd.vec = np.array([forward, sideways, turn_rate], dtype=float)
-    go = env.cfg.command.go_command
-    if go:  # a free-run policy knows one command: any move is it (as robot/policy.py)
-        cmd.vec = np.array(go, dtype=float) if np.any(cmd.vec) else np.zeros(3)
+    if env.cfg.command.go_command:  # a free-run policy knows "go" (+ a turn rate): any move is go (as robot/policy.py)
+        cmd.vec = go_vec(env, turn_rate) if np.any(cmd.vec) else np.zeros(3)
     if not np.any(cmd.vec) and not cmd.standing:
         cmd.stand_since = env.episode.t
     cmd.standing = not np.any(cmd.vec)

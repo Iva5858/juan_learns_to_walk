@@ -160,7 +160,10 @@ class VideoRecorder(BaseCallback):
         cfg = EnvConfig.from_dict(cfg.to_dict())
         # the shortest delay it trains with: the nominal robot's in perfect-physics stages
         rc = cfg.randomization
-        self.delay = int(rc.action_delay_steps[0] if rc.enabled else rc.nominal_delay_steps)
+        # (a delay range on the nominal robot: its longest, the closest to the robot's; free-run policies trained on
+        # 1-3 steps fell at once at 0, which the clips used to film)
+        self.delay = int(rc.action_delay_steps[0] if rc.enabled else
+                         rc.nominal_delay_range[1] if rc.nominal_delay_range else rc.nominal_delay_steps)
         cfg.randomization.enabled = False
         self.env = BipedEnv(cfg, render_mode="rgb_array", height=size[0], width=size[1])
         self.video_dir, self.freq, self.steps = Path(video_dir), freq, int(seconds / self.env.dt)
@@ -254,7 +257,8 @@ class VideoRecorder(BaseCallback):
             self.logger.record(f"video/{label}_left_m", dy)
             self.logger.record(f"video/{label}_turned_deg", turned)
             self.logger.record(f"video/{label}_seconds_up", seconds)
-            name = f"step_{self.num_timesteps // 1000:06d}k_{label}{abs(value):.2f}_{result}.mp4"
+            delay = f"_delay{self.delay}" if self.env.cfg.randomization.nominal_delay_range else ""
+            name = f"step_{self.num_timesteps // 1000:06d}k_{label}{abs(value):.2f}_{result}{delay}.mp4"
             imageio.mimsave(self.video_dir / name, frames, fps=fps)
             if k == 0:
                 imageio.mimsave(self.video_dir / "latest.mp4", frames, fps=fps)

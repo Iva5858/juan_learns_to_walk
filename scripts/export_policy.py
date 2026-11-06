@@ -62,7 +62,8 @@ def export(run, out):
             "joint_hi": env.robot.joint_hi, "gait_period": c.gait_period, "gait_period_fast": c.gait_period_fast,
             "fast_speed": c.fast_speed, "joints": np.array(NAMES), "run": run.name,
             "forward_range": (-c.backward_speed, top_speed(run, c)), "lateral_range": c.lateral_range,
-            "yaw_rate_range": c.yaw_rate_range, "clock": c.clock, "go_command": np.asarray(c.go_command, dtype=float)}
+            "yaw_rate_range": c.yaw_rate_range, "clock": c.clock, "go_command": np.asarray(c.go_command, dtype=float),
+            "go_turn_range": np.asarray(c.go_turn_range, dtype=float)}
     data.update({f"meta_{k}": np.asarray(v) for k, v in meta.items()})
     tmp = out.with_suffix(".tmp.npz")
     np.savez(tmp, **data)

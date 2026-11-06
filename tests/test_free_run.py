@@ -146,3 +146,54 @@ def test_hip_roll_free_band():
     w.hip_roll_free_deg = 12.0
     assert rewards.hip_roll(env, q(10), w) == 0.0                                # within the band: free
     assert np.isclose(rewards.hip_roll(env, q(19), w), 2 * np.radians(7) ** 2)   # only the excess
+
+
+def test_nominal_delay_range():
+    cfg = speed_cfg()
+    env = BipedEnv(cfg)
+    env.reset(seed=0)
+    assert env.servo.action_delay == 0   # default: the fixed nominal delay
+    cfg.randomization.nominal_delay_range = (1, 4)
+    env = BipedEnv(cfg)
+    seen = set()
+    for seed in range(40):
+        env.reset(seed=seed)
+        seen.add(env.servo.action_delay)
+    assert seen == {1, 2, 3, 4}
+    assert env.episode.target_buf.maxlen >= 5  # room for a 4-step delay (the buffer used to be sized for 2)
+
+
+def test_swing_knee_pays_a_bent_lifted_leg_that_travels():
+    env = SimpleNamespace(robot=SimpleNamespace(knee_idx=[2, 6]), episode=SimpleNamespace(contact=np.array([0.0, 1.0])))
+    q = lambda left, right: np.radians(np.array([0, 0, left, 0, 0, 0, right, 0], dtype=float))
+    w = RewardWeights()
+    assert rewards.swing_knee(env, SimpleNamespace(q=q(40, 40), net_vx=0.3), w) == 0.0     # off by default
+    w.swing_knee = 1.0
+    assert np.isclose(rewards.swing_knee(env, SimpleNamespace(q=q(40, 40), net_vx=0.3), w), 0.5)   # left in the air
+    assert np.isclose(rewards.swing_knee(env, SimpleNamespace(q=q(-80, 0), net_vx=0.3), w), 0.5)   # bird knee, capped
+    assert np.isclose(rewards.swing_knee(env, SimpleNamespace(q=q(20, 40), net_vx=0.3), w), 0.25)  # stance knee: nothing
+    assert rewards.swing_knee(env, SimpleNamespace(q=q(40, 40), net_vx=0.0), w) == 0.0             # in place: nothing
+
+
+def test_go_with_a_turn_rate():
+    cfg = speed_cfg()
+    cfg.command.go_turn_range = (-0.6, 0.6)
+    env = BipedEnv(cfg)
+    rates = set()
+    for seed in range(5):
+        env.reset(seed=seed)
+        assert env.command.vec[0] == 1.0 and not env.command.standing
+        rates.add(round(float(env.command.vec[2]), 3))
+    assert len(rates) > 1 and all(abs(r) <= 0.6 for r in rates)   # random turn rates while going
+    env.set_command(0.2, 0.0, 0.9)
+    assert np.allclose(env.command.vec, (1.0, 0.0, 0.6))            # go, the turn clipped to the trained range
+    env.reset(seed=0, options={"command": (0.4, 0.0, -0.3)})
+    assert np.allclose(env.command.vec, (1.0, 0.0, -0.3))           # a test can ask for a turn rate
+    from robot.policy import Controller
+    meta = {"control_hz": 50.0, "history": 3, "home": np.zeros(8), "joint_lo": -np.ones(8), "joint_hi": np.ones(8),
+            "action_scale": np.ones(8), "action_filter": 0.5, "gait_period": 0.8, "gait_period_fast": 0.45,
+            "fast_speed": 0.8, "clock": False, "go_command": np.array([1.0, 0.0, 0.0]),
+            "go_turn_range": np.array([-0.6, 0.6])}
+    ctrl = Controller(SimpleNamespace(meta=meta))
+    ctrl.set_command(0.0, 0.0, 0.4)
+    assert np.allclose(ctrl.command, (1.0, 0.0, 0.4))   # the dashboard's turn passes through; any move is go

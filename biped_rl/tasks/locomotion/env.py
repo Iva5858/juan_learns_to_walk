@@ -513,7 +513,8 @@ class BipedEnv(gym.Env):
         self.command.phase = rng.uniform()
         self.episode = ep = EpisodeState(
             target=robot.home_joint.copy(), filtered=np.zeros(self.nu),
-            target_buf=deque(maxlen=cfg.randomization.action_delay_steps[1] + 1),
+            target_buf=deque(maxlen=max(cfg.randomization.action_delay_steps[1], cfg.randomization.nominal_delay_steps,
+                                        *(cfg.randomization.nominal_delay_range or (0,))) + 1),
             sensor_buf=deque(maxlen=cfg.history + cfg.randomization.obs_delay_steps[1]),
             action_buf=deque(maxlen=cfg.history),
             last_qvel=d.qvel[robot.dof_idx].copy(), clearance=self.soles()[0][:, 2] - robot.home_sole_z,

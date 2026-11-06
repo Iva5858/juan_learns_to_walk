@@ -22,6 +22,9 @@ def set_nominal_physics(env):
     sv.kd = np.full(nu, r.kd)
     sv.latency_steps = 0
     sv.action_delay, sv.obs_delay = int(env.cfg.randomization.nominal_delay_steps), 0
+    span = env.cfg.randomization.nominal_delay_range
+    if span:
+        sv.action_delay = int(env.np_random.integers(int(span[0]), int(span[1]) + 1))
     sv.backlash = np.zeros(nu)
     sv.joint_offset = np.zeros(nu)
     env.domain.friction_scale = 1.0

@@ -15,6 +15,7 @@
 #
 #   STAGES=1 STEPS1=20000000 caffeinate -i ./scripts/speed_chain.sh v11/juan_v11 2>&1 | tee runs/logs/v11/pilot.log
 #   FROM=runs/v11/juan_v11_speed_best caffeinate -i ./scripts/speed_chain.sh v11/juan_v11b 2>&1 | tee runs/logs/v11/chain.log
+#   STEPS1=0 FROM=runs/v11/juan_v11d_speed_best ./scripts/speed_chain.sh v11/juan_v11e ...   (stages 2-3 only)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 NAME=${1:?usage: scripts/speed_chain.sh <generation>/<name prefix> [train.py options for every stage]}
@@ -40,18 +41,24 @@ pick() {  # the run to continue from: test final and best of stage $1 on robot $
 }
 
 S1=${NAME}_speed
-if [[ -n ${FROM:-} ]]; then
+if [[ $STEPS1 == 0 ]]; then  # skip stage 1: FROM is already a speed-stage result that passed the gate
+    P1=${FROM:?STEPS1=0 needs FROM}
+    : > "$REPORT"
+    echo "=== $(date +%H:%M) 1/3 speed: skipped, continuing from $P1"
+elif [[ -n ${FROM:-} ]]; then
     echo "=== $(date +%H:%M) 1/3 speed: continue $FROM -> runs/$S1 ($STEPS1 more steps, lr $LR)"
     python scripts/train.py --run-name "$S1" --stage speed --resume "$FROM" --min-std 0.01 --lr "$LR" --timesteps "$STEPS1" "$@"
 else
     echo "=== $(date +%H:%M) 1/3 speed: from scratch -> runs/$S1 ($STEPS1 steps)"
     python scripts/train.py --run-name "$S1" --stage speed --init-std-rad 0.05 --timesteps "$STEPS1" "$@"
 fi
-best_copy "$S1"
-: > "$REPORT"
-P1=$(pick "$S1" nominal)
-if [[ $STAGES == 1 ]]; then
-    echo "=== $(date +%H:%M) done (stage 1 only): $REPORT"; exit 0
+if [[ $STEPS1 != 0 ]]; then
+    best_copy "$S1"
+    : > "$REPORT"
+    P1=$(pick "$S1" nominal)
+    if [[ $STAGES == 1 ]]; then
+        echo "=== $(date +%H:%M) done (stage 1 only): $REPORT"; exit 0
+    fi
 fi
 if ! python scripts/analysis/free_run_test.py "$P1" --gate "$GATE" | tail -1 | tee -a "$REPORT" | grep -q PASS; then
     echo "=== $(date +%H:%M) STOP: $P1 doesn't reach $GATE m/s net of sliding with <= 30% falls" | tee -a "$REPORT"

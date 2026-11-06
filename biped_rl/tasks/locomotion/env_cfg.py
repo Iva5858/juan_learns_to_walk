@@ -61,6 +61,8 @@ class CommandConfig:
     # Free run (the speed stage): every command is this (forward, sideways, turn rate), never "stand", and
     # the reward is speed itself (RewardWeights.net_speed). () = off
     go_command: tuple = ()
+    go_turn_range: tuple = ()               # rad/s (+ = left): with go_command, a turn rate from this range at every new
+                                            # command (resample_interval), so the dashboard can steer it; () = straight
     clock: bool = True                      # the gait clock in the observation; False: always (0, 0), so no
                                             # rhythm is suggested (the free run finds its own cadence)
 
@@ -111,6 +113,9 @@ class RewardWeights:
     free_air_min: float = 0.1               # s
     free_air_cap: float = 0.3               # s
     free_air_speed: float = 0.1             # m/s
+    swing_knee: float = 0.0                 # per foot off the floor: its knee bent (either way, bird knees too) up to
+    swing_knee_deg: float = 40.0            # this far, x the net speed up to free_air_speed; 0 = off (juan_v11 walked
+                                            # stiff-legged, clearing the floor by tilting its pelvis)
     fall_refund_s: float = 0.0              # s: a fall or hardware stop takes back the net_speed paid over this
                                             # long before it (a dive forward earns ~0, not +75); 0 = off
     # --- survival ---
@@ -210,6 +215,9 @@ class RandomizationConfig:
     # that react instantly: juan_v8's free run found a 9.5 steps/s shuffle the real servos (3-4 steps late)
     # could never drive.
     nominal_delay_steps: int = 0
+    nominal_delay_range: tuple = ()         # (lo, hi): instead, a delay drawn per episode from lo..hi steps on the
+                                            # nominal robot (a policy that only knew 1 step fell at 0 and at 2:
+                                            # juan_v11e; the robot measured 3-4); () = off
     obs_delay_steps: tuple = (0, 1)         # IMU and joint readings are this many steps old
     # --- IMU. Errors that stay the same through an episode (accelerometer offset and mounting, gyro
     # zero-rate offset) matter more than its white noise.
