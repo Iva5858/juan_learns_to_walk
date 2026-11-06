@@ -12,6 +12,7 @@ behavior can take the steering (steer_owner) so nothing else changes the command
 Every run is logged to robot/logs/ (observations, actions, targets, joints, IMU, timing, whether the
 camera and face detection were running) for comparing with the simulator.
 """
+import json
 import math
 import os
 import threading
@@ -42,18 +43,50 @@ PI_FIELDS = ("cpu", "self_cpu", "load", "mem_used_mb", "arm_mhz", "gpu_mhz", "te
              "throttled", "bus_ms", "imu_failures")
 
 
+WALK_ROLES = ("walk", "speed")   # the walking policies' roles, in the page's order; plus "getup"
+
+
+def roles():
+    """robot/policies/roles.json: the one policy per role the page offers ({"walk": name, "speed": name or null,
+    "getup": name}; scripts/policies.py sets it). Every other exported policy stays in the folder, unlisted (the
+    library). None if there is no roles file: then every policy is listed, as before."""
+    try:
+        with open(os.path.join(POLICY_DIR, "roles.json")) as f:
+            r = json.load(f)
+        return r if isinstance(r, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _exported(sub=""):
+    d = os.path.join(POLICY_DIR, sub)
+    return sorted(f[:-4] for f in os.listdir(d) if f.endswith(".npz")) if os.path.isdir(d) else []
+
+
 def policies():
-    return sorted(f[:-4] for f in os.listdir(POLICY_DIR) if f.endswith(".npz")) if os.path.isdir(POLICY_DIR) else []
+    """The walking policies the page offers: the roles' (walk, then speed), or every exported one without roles.json."""
+    r, have = roles(), _exported()
+    if r is None:
+        return have
+    return [n for n in dict.fromkeys(r.get(k) for k in WALK_ROLES) if n in have]
 
 
 def getup_policies():
     """The getup policies (robot/policies/getup/, scripts/export_getup.py): never offered as walking policies."""
-    d = os.path.join(POLICY_DIR, "getup")
-    return sorted(f[:-4] for f in os.listdir(d) if f.endswith(".npz")) if os.path.isdir(d) else []
+    r, have = roles(), _exported("getup")
+    return have if r is None else [n for n in [r.get("getup")] if n in have]
+
+
+def policy_labels():
+    """{policy name: its role} for the page's lists."""
+    return {n: k for k, n in (roles() or {}).items() if n}
 
 
 def default_policy():
-    """The recommended policy, preselected on the page: robot/policies/default.txt (one name)."""
+    """The policy preselected on the page: the walk role (or, without roles.json, robot/policies/default.txt)."""
+    r = roles()
+    if r is not None:
+        return r.get("walk") if r.get("walk") in policies() else None
     try:
         with open(os.path.join(POLICY_DIR, "default.txt")) as f:
             name = f.read().strip()
@@ -335,6 +368,6 @@ class Walker:
                 "link_s": time.monotonic() - self.last_link, "link_limits": [LINK_STAND_S, LINK_STOP_S],
                 "policies": policies(), "default": default_policy(), "move_ms": self.move_ms, **self.stats,
                 "command_source": self.command_source, "steer_owner": self.steer_owner,
-                "phase": self.phase, "getup_policies": getup_policies(),
+                "phase": self.phase, "getup_policies": getup_policies(), "labels": policy_labels(),
                 "ranges": None if self.ctrl is None else {k: np.asarray(self.ctrl.policy.meta[k]).tolist()
                                                           for k in ("forward_range", "lateral_range", "yaw_rate_range")}}

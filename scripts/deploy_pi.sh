@@ -2,8 +2,9 @@
 # Bring the robot's Raspberry Pi up to date with this computer, in one go:
 #   1. the code: the Pi checks out the same branch and pulls it from GitHub (push it first);
 #      the Pi's own robot/calibration.json is kept whatever the branch holds;
-#   2. what git doesn't carry: the speech and face models (robot/models/) and every exported policy
-#      (robot/policies/*.npz), including experimental ones that aren't committed;
+#   2. what git doesn't carry: the speech and face models (robot/models/) and the policies that have a role in
+#      robot/policies/roles.json (walk, speed, getup: scripts/policies.py), committed or not; the rest of the
+#      exports stay on this computer (without roles.json: every exported policy, as before);
 #   3. with --install, the Pi packages for voice and faces (OpenCV, Vosk, sounddevice; asks for sudo).
 # It doesn't start anything: run python3 -m robot.dashboard on the Pi afterwards.
 #
@@ -47,8 +48,13 @@ ssh "$PI" "set -e; cd $DIR
 
 echo "=== 2/3 models and policies"
 rsync -az robot/models/ "$PI:$DIR/robot/models/"
-rsync -az --include='*/' --include='*.npz' --exclude='*' robot/policies/ "$PI:$DIR/robot/policies/"   # with getup/
-ssh "$PI" "cd $DIR/robot/policies && ls *.npz getup/*.npz 2>/dev/null | sed 's/^/   /'"
+if [[ -f robot/policies/roles.json ]]; then
+    python3 scripts/policies.py --files | rsync -az --files-from=- robot/policies/ "$PI:$DIR/robot/policies/"
+    python3 scripts/policies.py | sed 's/^/   /'
+else
+    rsync -az --include='*/' --include='*.npz' --exclude='*' robot/policies/ "$PI:$DIR/robot/policies/"   # with getup/
+    ssh "$PI" "cd $DIR/robot/policies && ls *.npz getup/*.npz 2>/dev/null | sed 's/^/   /'"
+fi
 
 if [[ ${1:-} == --install ]]; then
     echo "=== 3/3 packages for voice and faces"

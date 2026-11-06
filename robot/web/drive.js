@@ -299,9 +299,10 @@ onState((S, full) => {
   if (full) {
     const sel = $('dPolicy');
     const gs = $('dGetup'), gp = w.getup_policies || [];
-    if (gs.options.length !== gp.length) gs.innerHTML = gp.map(p => `<option>${esc(p)}</option>`).join('') || '<option value="">no getup policy</option>';
+    const opt = p => `<option value="${esc(p)}">${esc((w.labels || {})[p] ? `${w.labels[p]} · ${p}` : p)}</option>`;
+    if (gs.options.length !== gp.length) gs.innerHTML = gp.map(opt).join('') || '<option value="">no getup policy</option>';
     if (sel.options.length !== w.policies.length) {
-      sel.innerHTML = w.policies.map(p => `<option>${esc(p)}</option>`).join('');
+      sel.innerHTML = w.policies.map(opt).join('');
       sel.value = w.policy || w.default || w.policies[w.policies.length - 1];
     }
     const c = S.camera;
