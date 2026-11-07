@@ -56,7 +56,7 @@
       <!-- Part m2_x_8_socket_head_screw_5 -->
       <geom type="mesh" class="visual" pos="-0.04002 -0.0060124 0.3694" quat="1 0 -0 -0" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
       <!-- Part 8_head_shelf -->
-      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="8_head_shelf" material="8_head_shelf_material" mass="0.04712" />
+      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="8_head_shelf" material="8_head_shelf_material" mass="0.0213154" />
       <!-- Part usb_c_plug -->
       <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="usb_c_plug" material="usb_c_plug_material" mass="0.00286154" />
       <!-- Part m2_x_8_socket_head_screw_6 -->
@@ -82,7 +82,7 @@
       <!-- Part m2_x_8_socket_head_screw_7 -->
       <geom type="mesh" class="visual" pos="0.0095 0.0013476 0.3994" quat="1 0 -0 -0" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
       <!-- Part 5_pelvis -->
-      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="5_pelvis" material="5_pelvis_material" mass="0.30035" />
+      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="5_pelvis" material="5_pelvis_material" mass="0.148315" />
       <geom type="mesh" class="collision" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="5_pelvis" material="5_pelvis_material" density="0" />
       <!-- Part m2_heat_set_insert_12 -->
       <geom type="mesh" class="visual" pos="-0.003 -0.0301524 0.3608" quat="1 0 -0 -0" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
@@ -95,7 +95,7 @@
       <!-- Part motor_battery_leads_to_the_debug_board_s_screw_terminal__2_wires__drawn_as_one -->
       <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="motor_battery_leads_to_the_debug_board_s_screw_terminal__2_wires__drawn_as_one" material="motor_battery_leads_to_the_debug_board_s_screw_terminal__2_wires__drawn_as_one_material" mass="0.00286154" />
       <!-- Part battery_3s_650_mah__pi -->
-      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="battery_3s_650_mah__pi" material="battery_3s_650_mah__pi_material" mass="0.05569" />
+      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="battery_3s_650_mah__pi" material="battery_3s_650_mah__pi_material" mass="0.059" />
       <!-- Part m2_heat_set_insert_14 -->
       <geom type="mesh" class="visual" pos="-0.0395 -0.0566524 0.3978" quat="1 0 -0 -0" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
       <!-- Part m2_x_12_socket_head_screw -->
@@ -107,7 +107,7 @@
       <!-- Part m2_heat_set_insert_15 -->
       <geom type="mesh" class="visual" pos="0.0095 -0.0566524 0.3978" quat="1 0 -0 -0" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
       <!-- Part 9_head_cover -->
-      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="9_head_cover" material="9_head_cover_material" mass="0.046" />
+      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="9_head_cover" material="9_head_cover_material" mass="0.0509" />
       <!-- Part m2_x_8_socket_head_screw_10 -->
       <geom type="mesh" class="visual" pos="-0.04016 0.0534676 0.39945" quat="1 0 -0 -0" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
       <!-- Part htd_35h_horn_2 -->
@@ -127,7 +127,7 @@
       <!-- Part m2_x_5_horn_screw__servo_bag_7 -->
       <geom type="mesh" class="visual" pos="-0.0283 0.0447973 0.276425" quat="0.5 0.5 -0.5 -0.5" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
       <!-- Part 7_head_tray -->
-      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="7_head_tray" material="7_head_tray_material" mass="0.05753" />
+      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="7_head_tray" material="7_head_tray_material" mass="0.0252771" />
       <!-- Part m2_heat_set_insert_18 -->
       <geom type="mesh" class="visual" pos="-0.04016 0.0534676 0.3978" quat="1 0 -0 -0" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
       <!-- Part m2_x_5_horn_screw__servo_bag_8 -->
@@ -163,7 +163,7 @@
       <!-- Part htd_35h_horn_3 -->
       <geom type="mesh" class="visual" pos="0.0261 -0.0401524 0.281375" quat="0.707107 0 0.707107 -0" mesh="htd_35h_horn" material="htd_35h_horn_material" mass="0.00195" />
       <!-- Part battery_3s_2200_mah__motors -->
-      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="battery_3s_2200_mah__motors" material="battery_3s_2200_mah__motors_material" mass="0.1685" />
+      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="battery_3s_2200_mah__motors" material="battery_3s_2200_mah__motors_material" mass="0.179" />
       <!-- Part htd_35h_horn_4 -->
       <geom type="mesh" class="visual" pos="0.0261 0.0398476 0.281375" quat="0 0.707107 -0 0.707107" mesh="htd_35h_horn" material="htd_35h_horn_material" mass="0.00195" />
       <!-- Part m2_x_8_socket_head_screw_16 -->
@@ -181,7 +181,7 @@
       <!-- Part m2_x_8_socket_head_screw_17 -->
       <geom type="mesh" class="visual" pos="-0.0395 0.0013476 0.3994" quat="1 0 -0 -0" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
       <!-- Part 6_battery_door -->
-      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="6_battery_door" material="6_battery_door_material" mass="0.018" />
+      <geom type="mesh" class="visual" pos="0 -0.0001524 0" quat="1 0 -0 -0" mesh="6_battery_door" material="6_battery_door_material" mass="0.00820252" />
       <!-- Part m2_x_8_socket_head_screw_18 -->
       <geom type="mesh" class="visual" pos="-0.003 0.0548476 0.3638" quat="1 0 -0 -0" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
       <!-- Part m2_x_8_socket_head_screw_19 -->
@@ -457,13 +457,13 @@
         <!-- Part m2_heat_set_insert_26 -->
         <geom type="mesh" class="visual" pos="0.013725 -0.01 0.01215" quat="0 -0 0.707107 0.707107" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
         <!-- Part 1b_hip_outboard -->
-        <geom type="mesh" class="visual" pos="-0.281375 0.04 0.02615" quat="0 -0.707107 0 -0.707107" mesh="1b_hip_outboard" material="1b_hip_outboard_material" mass="0.03376" />
+        <geom type="mesh" class="visual" pos="-0.281375 0.04 0.02615" quat="0 -0.707107 0 -0.707107" mesh="1b_hip_outboard" material="1b_hip_outboard_material" mass="0.0298" />
         <!-- Part trunk_lead_into_the_roll_servo__left -->
         <geom type="mesh" class="visual" pos="-0.281375 0.04 0.02615" quat="0 -0.707107 0 -0.707107" mesh="trunk_lead_into_the_roll_servo__left" material="trunk_lead_into_the_roll_servo__left_material" mass="0.000935714" />
         <!-- Part m2_heat_set_insert_27 -->
         <geom type="mesh" class="visual" pos="0.013725 -0.01 0.04015" quat="0 -0 0.707107 0.707107" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
         <!-- Part 1a_hip_inboard -->
-        <geom type="mesh" class="visual" pos="-0.281375 0.04 0.02615" quat="0 -0.707107 0 -0.707107" mesh="1a_hip_inboard" material="1a_hip_inboard_material" mass="0.0291" />
+        <geom type="mesh" class="visual" pos="-0.281375 0.04 0.02615" quat="0 -0.707107 0 -0.707107" mesh="1a_hip_inboard" material="1a_hip_inboard_material" mass="0.0228" />
         <!-- Part m2_x_8_socket_head_screw_25 -->
         <geom type="mesh" class="visual" pos="-0.014375 -0.007 0.00715" quat="0 -0 0.707107 0.707107" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
         <!-- Part htd_35h_servo_body -->
@@ -519,7 +519,7 @@
           <!-- Part m2_heat_set_insert_35 -->
           <geom type="mesh" class="visual" pos="0.0197 -0.1077 -0.02615" quat="0 0.707107 0.707107 -0" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
           <!-- Part 2b_thigh_outboard -->
-          <geom type="mesh" class="visual" pos="-0 -0.232 0.02385" quat="0.707107 -0.707107 0 -0" mesh="2b_thigh_outboard" material="2b_thigh_outboard_material" mass="0.03085" />
+          <geom type="mesh" class="visual" pos="-0 -0.232 0.02385" quat="0.707107 -0.707107 0 -0" mesh="2b_thigh_outboard" material="2b_thigh_outboard_material" mass="0.0271" />
           <!-- Part htd_35h_servo_body_3 -->
           <geom type="mesh" class="visual" pos="-0 -0.1 -0.02615" quat="0.707107 -0.707107 0 -0" mesh="htd_35h_servo_body" material="htd_35h_servo_body_material" mass="0.064" />
           <!-- Part m2_x_5_horn_screw__servo_bag_23 -->
@@ -533,7 +533,7 @@
           <!-- Part m2_x_5_horn_screw__servo_bag_24 -->
           <geom type="mesh" class="visual" pos="0.00494975 -0.00494975 0.00215" quat="0.707107 -0 -0 -0.707107" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
           <!-- Part 2a_thigh_inboard -->
-          <geom type="mesh" class="visual" pos="-0 -0.232 0.02385" quat="0.707107 -0.707107 0 -0" mesh="2a_thigh_inboard" material="2a_thigh_inboard_material" mass="0.02522" />
+          <geom type="mesh" class="visual" pos="-0 -0.232 0.02385" quat="0.707107 -0.707107 0 -0" mesh="2a_thigh_inboard" material="2a_thigh_inboard_material" mass="0.0223" />
           <!-- Part m2_x_8_socket_head_screw_31 -->
           <geom type="mesh" class="visual" pos="-0.0035 -0.054 -0.02315" quat="0.707107 -0 -0 -0.707107" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
           <!-- Part m2_x_8_socket_head_screw_32 -->
@@ -545,11 +545,11 @@
             <!-- Part m2_x_5_horn_screw__servo_bag_25 -->
             <geom type="mesh" class="visual" pos="-0.00494975 0.00494975 0.00215" quat="0.707107 -0 1e-12 -0.707107" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
             <!-- Part 3a_shin_inboard -->
-            <geom type="mesh" class="visual" pos="-0 -0.132 0.02385" quat="0.707107 -0.707107 0 0" mesh="3a_shin_inboard" material="3a_shin_inboard_material" mass="0.02464" />
+            <geom type="mesh" class="visual" pos="-0 -0.132 0.02385" quat="0.707107 -0.707107 0 0" mesh="3a_shin_inboard" material="3a_shin_inboard_material" mass="0.0219" />
             <!-- Part m2_x_8_socket_head_screw_33 -->
             <geom type="mesh" class="visual" pos="-0 -0.033 -0.02315" quat="0.707107 -0 1e-12 -0.707107" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
             <!-- Part 3b_shin_outboard -->
-            <geom type="mesh" class="visual" pos="-0 -0.132 0.02385" quat="0.707107 -0.707107 0 0" mesh="3b_shin_outboard" material="3b_shin_outboard_material" mass="0.03016" />
+            <geom type="mesh" class="visual" pos="-0 -0.132 0.02385" quat="0.707107 -0.707107 0 0" mesh="3b_shin_outboard" material="3b_shin_outboard_material" mass="0.0268" />
             <!-- Part m2_heat_set_insert_36 -->
             <geom type="mesh" class="visual" pos="-0.0035 -0.054 -0.02615" quat="0.707107 -0 1e-12 -0.707107" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
             <!-- Part m2_x_8_socket_head_screw_34 -->
@@ -597,7 +597,7 @@
               <!-- Part m2_x_5_horn_screw__servo_bag_33 -->
               <geom type="mesh" class="visual" pos="0.00494975 0.00494975 -0.05485" quat="0 0.707107 0.707107 0" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
               <!-- Part 4_ankle_foot -->
-              <geom type="mesh" class="visual" pos="0 -0.032 0.02385" quat="0.707107 -0.707107 0 0" mesh="4_ankle_foot" material="4_ankle_foot_material" mass="0.04646" />
+              <geom type="mesh" class="visual" pos="0 -0.032 0.02385" quat="0.707107 -0.707107 0 0" mesh="4_ankle_foot" material="4_ankle_foot_material" mass="0.0417" />
               <!-- Part htd_35h_horn_9 -->
               <geom type="mesh" class="visual" pos="0 0 -0.00045" quat="1 0 0 0" mesh="htd_35h_horn" material="htd_35h_horn_material" mass="0.00195" />
               <!-- Part m2_x_5_horn_screw__servo_bag_34 -->
@@ -616,19 +616,20 @@
               <geom type="mesh" class="visual" pos="0.00494975 -0.00494975 -0.05485" quat="0 0.707107 0.707107 0" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
               <!-- Part m2_x_5_horn_screw__servo_bag_40 -->
               <geom type="mesh" class="visual" pos="-0.00494975 0.00494975 0.00215" quat="0.707107 0 -0 -0.707107" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
-              <geom name="left_foot_link_sole" type="mesh" mesh="left_foot_link_pad" friction="0.55 0.005 0.0001" mass="0.025" rgba="0.12 0.12 0.12 1" />
+              <geom name="left_foot_link_sole" type="mesh" mesh="left_foot_link_pad" friction="0.55 0.005 0.0001" mass="0.0232" rgba="0.12 0.12 0.12 1" />
             </body>
-            <geom name="left_shin_link_capsule" type="capsule" size="0.02254" fromto="0 -0.015 0 0 -0.085 0" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
+            <geom name="left_shin_link_box" type="box" size="0.0180925 0.0683642 0.0322472" pos="-0.000471736 -0.0552467 -0.0263353" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
           </body>
-          <geom name="left_thigh_link_capsule" type="capsule" size="0.02472" fromto="0 -0.015 0 0 -0.085 0" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
+          <geom name="left_thigh_link_box" type="box" size="0.0181886 0.0685461 0.0322439" pos="2.75413e-05 -0.0551318 -0.0263457" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
         </body>
+        <geom name="left_hip_link_box" type="box" size="0.0414889 0.0307149 0.026" pos="-0.0297347 -0.00981438 0.026" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
       </body>
       <!-- Link right_hip_link -->
       <body name="right_hip_link" pos="-0.02615 -0.0401524 0.281375" quat="0 -0.707107 0 0.707107">
         <!-- Joint from body to right_hip_link -->
         <joint axis="-0 -0 -1" name="right_hip_roll" type="hinge" range="-0.331613 0.453786" />
         <!-- Part 1b_hip_outboard_mirrored -->
-        <geom type="mesh" class="visual" pos="0.281375 -0.04 -0.02615" quat="0 0.707107 -0 -0.707107" mesh="1b_hip_outboard_mirrored" material="1b_hip_outboard_mirrored_material" mass="0.03376" />
+        <geom type="mesh" class="visual" pos="0.281375 -0.04 -0.02615" quat="0 0.707107 -0 -0.707107" mesh="1b_hip_outboard_mirrored" material="1b_hip_outboard_mirrored_material" mass="0.0298" />
         <!-- Part htd_35h_servo_body_5 -->
         <geom type="mesh" class="visual" pos="0.049375 0.01 -0.02615" quat="0.707107 -0 -0.707107 0" mesh="htd_35h_servo_body" material="htd_35h_servo_body_material" mass="0.064" />
         <!-- Part m2_heat_set_insert_41 -->
@@ -656,7 +657,7 @@
         <!-- Part trunk_lead_into_the_roll_servo__right -->
         <geom type="mesh" class="visual" pos="0.281375 -0.04 -0.02615" quat="0 0.707107 -0 -0.707107" mesh="trunk_lead_into_the_roll_servo__right" material="trunk_lead_into_the_roll_servo__right_material" mass="0.000935714" />
         <!-- Part 1a_hip_inboard_mirrored -->
-        <geom type="mesh" class="visual" pos="0.281375 -0.04 -0.02615" quat="0 0.707107 -0 -0.707107" mesh="1a_hip_inboard_mirrored" material="1a_hip_inboard_mirrored_material" mass="0.0291" />
+        <geom type="mesh" class="visual" pos="0.281375 -0.04 -0.02615" quat="0 0.707107 -0 -0.707107" mesh="1a_hip_inboard_mirrored" material="1a_hip_inboard_mirrored_material" mass="0.0228" />
         <!-- Part m2_x_8_socket_head_screw_42 -->
         <geom type="mesh" class="visual" pos="0.057075 0.013 -0.04585" quat="0.707107 -0.707107 0 -0" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
         <!-- Part lead__roll_servo_to_hip_pitch_servo__right -->
@@ -668,7 +669,7 @@
           <!-- Part m2_x_5_horn_screw__servo_bag_41 -->
           <geom type="mesh" class="visual" pos="-0.00494975 -0.00494975 0.00215" quat="0.707107 0 0 0.707107" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
           <!-- Part 2b_thigh_outboard_mirrored -->
-          <geom type="mesh" class="visual" pos="-0 0.232 -0.07655" quat="0 0 0.707107 -0.707107" mesh="2b_thigh_outboard_mirrored" material="2b_thigh_outboard_mirrored_material" mass="0.03085" />
+          <geom type="mesh" class="visual" pos="-0 0.232 -0.07655" quat="0 0 0.707107 -0.707107" mesh="2b_thigh_outboard_mirrored" material="2b_thigh_outboard_mirrored_material" mass="0.0271" />
           <!-- Part m2_heat_set_insert_46 -->
           <geom type="mesh" class="visual" pos="0.0197 0.1077 -0.02655" quat="0.707107 0 0 0.707107" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
           <!-- Part m2_x_8_socket_head_screw_43 -->
@@ -676,7 +677,7 @@
           <!-- Part m2_heat_set_insert_47 -->
           <geom type="mesh" class="visual" pos="-0.0197 0.1077 -0.02655" quat="0.707107 0 0 0.707107" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
           <!-- Part 2a_thigh_inboard_mirrored -->
-          <geom type="mesh" class="visual" pos="-0 0.232 -0.07655" quat="0 0 0.707107 -0.707107" mesh="2a_thigh_inboard_mirrored" material="2a_thigh_inboard_mirrored_material" mass="0.02522" />
+          <geom type="mesh" class="visual" pos="-0 0.232 -0.07655" quat="0 0 0.707107 -0.707107" mesh="2a_thigh_inboard_mirrored" material="2a_thigh_inboard_mirrored_material" mass="0.0223" />
           <!-- Part m2_heat_set_insert_48 -->
           <geom type="mesh" class="visual" pos="-0.008 0.054 -0.02655" quat="0 0.707107 -0.707107 -0" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
           <!-- Part htd_35h_servo_body_7 -->
@@ -724,7 +725,7 @@
             <!-- Part m2_heat_set_insert_51 -->
             <geom type="mesh" class="visual" pos="0 0.033 -0.02655" quat="0 -0.707107 0.707107 0" mesh="m2_heat_set_insert" material="m2_heat_set_insert_material" mass="0.00012" />
             <!-- Part 3b_shin_outboard_mirrored -->
-            <geom type="mesh" class="visual" pos="0 0.132 -0.07655" quat="0 -0 -0.707107 0.707107" mesh="3b_shin_outboard_mirrored" material="3b_shin_outboard_mirrored_material" mass="0.03016" />
+            <geom type="mesh" class="visual" pos="0 0.132 -0.07655" quat="0 -0 -0.707107 0.707107" mesh="3b_shin_outboard_mirrored" material="3b_shin_outboard_mirrored_material" mass="0.0268" />
             <!-- Part m2_x_8_socket_head_screw_48 -->
             <geom type="mesh" class="visual" pos="0.0035 0.054 -0.02955" quat="0 -0.707107 0.707107 0" mesh="m2_x_8_socket_head_screw" material="m2_x_8_socket_head_screw_material" mass="0.00027" />
             <!-- Part m2_x_5_horn_screw__servo_bag_50 -->
@@ -754,7 +755,7 @@
             <!-- Part m2_x_5_horn_screw__servo_bag_54 -->
             <geom type="mesh" class="visual" pos="-0.00494975 -0.00494975 -0.05485" quat="0 -0.707107 0.707107 0" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
             <!-- Part 3a_shin_inboard_mirrored -->
-            <geom type="mesh" class="visual" pos="0 0.132 -0.07655" quat="0 -0 -0.707107 0.707107" mesh="3a_shin_inboard_mirrored" material="3a_shin_inboard_mirrored_material" mass="0.02464" />
+            <geom type="mesh" class="visual" pos="0 0.132 -0.07655" quat="0 -0 -0.707107 0.707107" mesh="3a_shin_inboard_mirrored" material="3a_shin_inboard_mirrored_material" mass="0.0219" />
             <!-- Part m2_x_5_horn_screw__servo_bag_55 -->
             <geom type="mesh" class="visual" pos="0.00494975 0.00494975 -0.05485" quat="0 -0.707107 0.707107 0" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
             <!-- Part lead_in_from_the_thigh_to_the_ankle_servo__right -->
@@ -790,15 +791,16 @@
               <!-- Part m2_x_5_horn_screw__servo_bag_63 -->
               <geom type="mesh" class="visual" pos="-0.00494975 0.00494975 -0.05485" quat="0 0.707107 -0.707107 -0" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
               <!-- Part 4_ankle_foot_mirrored -->
-              <geom type="mesh" class="visual" pos="-0 -0.032 0.02385" quat="0 0 -0.707107 -0.707107" mesh="4_ankle_foot_mirrored" material="4_ankle_foot_mirrored_material" mass="0.04646" />
+              <geom type="mesh" class="visual" pos="-0 -0.032 0.02385" quat="0 0 -0.707107 -0.707107" mesh="4_ankle_foot_mirrored" material="4_ankle_foot_mirrored_material" mass="0.0417" />
               <!-- Part m2_x_5_horn_screw__servo_bag_64 -->
               <geom type="mesh" class="visual" pos="-0.00494975 -0.00494975 0.00215" quat="0.707107 0 0 0.707107" mesh="m2_x_5_horn_screw__servo_bag" material="m2_x_5_horn_screw__servo_bag_material" mass="0.00015" />
-              <geom name="right_foot_link_sole" type="mesh" mesh="right_foot_link_pad" friction="0.55 0.005 0.0001" mass="0.025" rgba="0.12 0.12 0.12 1" />
+              <geom name="right_foot_link_sole" type="mesh" mesh="right_foot_link_pad" friction="0.55 0.005 0.0001" mass="0.0232" rgba="0.12 0.12 0.12 1" />
             </body>
-            <geom name="right_shin_link_capsule" type="capsule" size="0.02254" fromto="0 0.015 -0.007905 0 0.085 -0.044795" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
+            <geom name="right_shin_link_box" type="box" size="0.0181273 0.0673875 0.0322782" pos="0.000422082 0.0551359 -0.0263893" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
           </body>
-          <geom name="right_thigh_link_capsule" type="capsule" size="0.02472" fromto="0 0.015 -0.000105 0 0.085 -0.000595" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
+          <geom name="right_thigh_link_box" type="box" size="0.0184241 0.0685465 0.0322826" pos="0.000217446 0.0551621 -0.0263899" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
         </body>
+        <geom name="right_hip_link_box" type="box" size="0.0417261 0.0307097 0.026" pos="0.0296288 0.00975661 -0.026" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
       </body>
       <geom name="head_box" type="box" size="0.053564 0.0734249 0.0348644" pos="0.00011795 -0.00015209 0.396867" density="0" rgba="0.8 0.3 0.3 0.25" group="3" />
       <site name="imu" pos="-0.03 0.0458476 0.3978" size="0.005" />

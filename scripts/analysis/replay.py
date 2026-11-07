@@ -31,13 +31,34 @@ LATENCY_MS = 10         # within the step
 
 
 def tilt_quat(gravity):
-    """Torso orientation (yaw 0) whose down vector in the body frame is `gravity`."""
+    """Torso orientation whose down vector in the body frame is `gravity`: the smallest rotation taking the
+    body's down (-z) to it. (Roll and pitch angles lose the pitch when the robot lies on a side, roll ~90 deg.)"""
     g = np.asarray(gravity, float) / np.linalg.norm(gravity)
-    roll = math.atan2(-g[1], -g[2])
-    pitch = math.atan2(g[0], math.hypot(g[1], g[2]))
+    down = np.array([0.0, 0.0, -1.0])
+    axis = np.cross(g, down)   # rotates the body-frame g onto the world's down
+    s, c = np.linalg.norm(axis), float(np.dot(g, down))
+    if s < 1e-9:
+        return np.array([1.0, 0.0, 0.0, 0.0]) if c > 0 else np.array([0.0, 1.0, 0.0, 0.0])
     q = np.zeros(4)
-    mujoco.mju_euler2Quat(q, np.array([roll, pitch, 0.0]), "xyz")
+    mujoco.mju_axisAngle2Quat(q, axis / s, math.atan2(s, c))
     return q
+
+
+def on_floor(env):
+    """Lower or raise the robot until its lowest collision geom just touches the floor (any pose)."""
+    m, d = env.model, env.data
+    floor = m.geom("floor").id
+
+    def touches():
+        mujoco.mj_forward(m, d)
+        return any(floor in (c.geom1, c.geom2) and c.dist < 0 for c in d.contact[:d.ncon])
+
+    lo, hi = -0.5, 0.5   # the height between touching and clear, by bisection to 0.1 mm
+    while hi - lo > 1e-4:
+        d.qpos[2] = (lo + hi) / 2
+        lo, hi = (d.qpos[2], hi) if touches() else (lo, d.qpos[2])
+    d.qpos[2] = hi
+    mujoco.mj_forward(m, d)
 
 
 def replay_window(env, log, k0, n, delay, servo):
@@ -51,7 +72,10 @@ def replay_window(env, log, k0, n, delay, servo):
     d.qvel[:] = 0.0
     d.qvel[robot.dof_idx] = log["qd"][k0]
     mujoco.mj_forward(env.model, d)
-    env.ground()
+    if log["gravity"][k0][2] / np.linalg.norm(log["gravity"][k0]) > -0.7:
+        on_floor(env)   # lying or falling (> 45 deg tilt): the soles aren't what touches the floor
+    else:
+        env.ground()
     lat = min(int(LATENCY_MS / 1000 / env.model.opt.timestep), env.frame_skip - 1)
     target = log["target"][max(k0 - delay - 1, 0)]
     sim_q, sim_g = [], []

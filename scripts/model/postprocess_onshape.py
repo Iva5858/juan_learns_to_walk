@@ -13,8 +13,10 @@ What it does:
   * hip roll range: 7 deg inward / 25 deg outward on both legs (direction measured on the model);
     hip pitch, knee and ankle ranges: PITCH_RANGE_DEG (the robot's measured ranges, minus a margin)
   * removes any coupling between joints (Onshape gear relations) and gives all 8 joints a servo
-  * foot soles = the rolled TPU soles (a convex rocker, stable contact instead of mesh hulls), capsules on
-    thighs and shins (legs cannot pass through each other; knee on the floor = a fall), a box on the head
+  * foot soles = the rolled TPU soles (a convex rocker, stable contact instead of mesh hulls), boxes on the hip,
+    thigh and shin links (legs cannot pass through each other; knee on the floor = a fall; the robot lying on
+    a side rests on their flat faces) or capsules (--leg-collision), a box on the head
+  * the whole robot's weighed mass (--total-mass): the BoM's difference goes to the torso prints
   * IMU site, home keyframe (crouched, feet flat, just touching the floor)
 """
 import argparse
@@ -32,25 +34,25 @@ MASS_RULES = [
     # BoM v3 (2026-10-30): printed parts are slicer estimates at the print settings (4 walls, 25 % infill for
     # the legs and feet, 20 % pelvis, 15 % head); the legs are the generative-design parts (new_parts/).
     # The robot comes out ~1.88 kg with the lattice head cover (the old pitch-deck BoM gave 1.75 kg on another basis).
-    (r"^1a_hip_", 29.1, "each"),
-    (r"^1b_hip_", 33.76, "each"),
-    (r"^2a_thigh_", 25.22, "each"),
-    (r"^2b_thigh_", 30.85, "each"),
-    (r"^3a_shin_", 24.64, "each"),
-    (r"^3b_shin_", 30.16, "each"),
-    (r"^4_ankle_foot", 46.46, "each"),        # + the rolled TPU sole (25 g) as the sole: --pad-mass
-    (r"^5_pelvis", 300.35, "each"),
-    (r"^6_battery_door", 18.0, "each"),
-    (r"^7_head_tray", 57.53, "each"),
-    (r"^8_head_shelf", 47.12, "each"),
-    (r"^9_head_cover", 46, "each"),        # the lattice cover: 41.7 cm3 x ~1.1 g/cm3 (thin members print
-                                          # near solid, as the generative legs do), an estimate; solid: 112.47
+    # Printed parts: the slicer's weights as printed (2026-11-07); the whole robot weighs 1.627 kg.
+    (r"^1a_hip_", 22.8, "each"),
+    (r"^1b_hip_", 29.8, "each"),
+    (r"^2a_thigh_", 22.3, "each"),
+    (r"^2b_thigh_", 27.1, "each"),
+    (r"^3a_shin_", 21.9, "each"),
+    (r"^3b_shin_", 26.8, "each"),
+    (r"^4_ankle_foot", 41.7, "each"),        # + the rolled TPU sole (23.2 g) as the sole: --pad-mass
+    (r"^5_pelvis", 265.8, "each"),
+    (r"^6_battery_door", 14.7, "each"),
+    (r"^7_head_tray", 45.3, "each"),
+    (r"^8_head_shelf", 38.2, "each"),
+    (r"^9_head_cover", 50.9, "each"),        # the lattice cover
     (r"^debug_board_holder", 7, "each"),
     # electronics: HTD-35H 64 g (datasheet) + 2 aluminium horns x 1.95 g
     (r"^htd_35h_servo_body", 64, "each"),
     (r"^htd_35h_horn", 1.95, "each"),
-    (r"^battery_3s_2200", 168.5, "each"),     # less its leads and plug (counted with the cables)
-    (r"^battery_3s_650", 55.69, "each"),
+    (r"^battery_3s_2200", 179, "each"),       # Ovonic 3S 2200 50C listing, with its leads and plug
+    (r"^battery_3s_650", 59, "each"),         # Ovonic 3S 650 listing (236 g per 4)
     (r"^raspberry_pi_4", 47, "each"),
     (r"^pi_camera_v2", 3, "each"),
     (r"^lm2596_regulator", 11, "total"),
@@ -69,6 +71,9 @@ MASS_RULES = [
     (r"^m2_x_12_socket_head_screw", 0.35, "each"),
     (r"^m2_x_5_horn_screw", 0.15, "each"),
 ]
+# The torso's prints whose settings aren't known for sure (the pelvis was printed lighter than sliced): the parts
+# --total-mass rescales to match the scale. The legs, feet, soles and lattice cover are sliced as printed.
+TORSO_PRINTS = r"^(5_pelvis|6_battery_door|7_head_tray|8_head_shelf)"
 # Thin / hollow parts: mass on the surface ("shell"); dense parts: solid convex hull ("convex")
 SHELL_PARTS = (r"^(\d[ab]?_|debug_board_holder|circuit_board|lead|servo_bus_lead|trunk_lead|camera_ribbon|imu_wires|"
                r"usb_c_power|usb_cable|motor_battery_leads|pi_battery_leads|adafruit_bno055|lm2596)")
@@ -80,6 +85,10 @@ ACTUATOR_ORDER = ("left_hip_roll", "left_hip_pitch", "left_knee", "left_ankle",
 FEET = ("left_foot_link", "right_foot_link")
 LEG_CAPSULES = {"left_thigh_link": "left_shin_link", "left_shin_link": "left_foot_link",
                 "right_thigh_link": "right_shin_link", "right_shin_link": "right_foot_link"}
+# --leg-collision box: link -> how much of the box's end at the parent joint (local +y) is left out [m]
+LEG_BOXES = {f"{side}_{seg}_link": trim for side in ("left", "right")
+             for seg, trim in (("hip", 0.0), ("thigh", 0.0), ("shin", 0.0))}
+LEG_BOX_PARTS = r"^(1[ab]_hip|2[ab]_thigh|3[ab]_shin|htd_35h_servo_body)"
 ROLL_INWARD_DEG, ROLL_OUTWARD_DEG = 26.0, 19.0
 # Pitch-joint ranges (deg, training conventions): the robot's measured ranges minus a 5 deg margin,
 # the narrower of the two legs (the policy is mirror-symmetric).
@@ -143,14 +152,43 @@ def sole_bottom(model, data, foot):
     return float((data.geom_xpos[g] + v @ data.geom_xmat[g].reshape(3, 3).T)[:, 2].min())
 
 
+def leg_boxes(model, data, bodies, report):
+    """A box on each hip, thigh and shin link around its printed halves and its servo, in the link's frame
+    (the frames are the legs' own: thighs and shins run along -y). The robot lying on its side rests on these
+    flat faces (photos 2026-11-07); capsules rolled, and the hip links had no collision at all."""
+    for link, trim in LEG_BOXES.items():
+        bid = model.body(link).id
+        R, x = data.xmat[bid].reshape(3, 3), data.xpos[bid]
+        pts = []
+        for g in range(model.ngeom):
+            mname = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_MESH, model.geom_dataid[g]) or ""
+            if model.geom_bodyid[g] == bid and re.match(LEG_BOX_PARTS, mname):
+                mid = model.geom_dataid[g]
+                v = model.mesh_vert[model.mesh_vertadr[mid]:model.mesh_vertadr[mid] + model.mesh_vertnum[mid]]
+                pts.append((data.geom_xpos[g] + v @ data.geom_xmat[g].reshape(3, 3).T - x) @ R)
+        pts = np.vstack(pts)
+        lo, hi = pts.min(axis=0), pts.max(axis=0)
+        hi[1] -= trim   # the end at the parent joint: clear of the torso at the hip-pitch limits
+        ET.SubElement(bodies[link], "geom", name=f"{link}_box", type="box", size=fmt((hi - lo) / 2),
+                      pos=fmt((hi + lo) / 2), density="0", rgba="0.8 0.3 0.3 0.25", group="3")
+        if link.startswith("left"):
+            report.append(f"{link.split('_')[1]}s: collision box {np.round(1000 * (hi - lo)).astype(int)} mm (link x y z)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("export_dir", type=Path)
     # The rolled TPU sole (4s_sole_v4_rolled_TPU): 6 mm under the foot, 113 x 68 mm overall (4 mm past the
     # printed foot at the heel, 5 mm at the toe), flat on the ground over 91 x 46 mm, the edge rolling up
-    # 6.5 mm over its last 11 mm all around; 34.9 cm3 of TPU, ~25 g at 20 % infill
+    # 6.5 mm over its last 11 mm all around; 34.9 cm3 of TPU, 23.2 g at 3 walls, 20 % infill (slicer)
     ap.add_argument("--pad-thickness", type=float, default=0.006, help="sole under the foot's flat middle [m]")
-    ap.add_argument("--pad-mass", type=float, default=25.0, help="per foot [g]")
+    ap.add_argument("--pad-mass", type=float, default=23.2, help="per foot [g]")
+    ap.add_argument("--leg-collision", choices=("box", "capsule"), default="box",
+                    help="boxes on the hip, thigh and shin links around their halves and servos (how the robot rests "
+                         "lying down: replayed robot logs match), or capsules on thighs and shins (every policy before "
+                         "2026-11-07 trained on them; the walkers test the same on both)")
+    ap.add_argument("--total-mass", type=float, default=1627.0, help="the whole robot on a scale [g], batteries in; "
+                    "the BoM's difference to it goes to the torso prints, TORSO_PRINTS (0: the BoM as it is)")
     ap.add_argument("--sole-heel", type=float, default=0.004, help="sole past the printed foot at the heel [m]")
     ap.add_argument("--sole-toe", type=float, default=0.005, help="sole past the printed foot at the toe [m]")
     ap.add_argument("--sole-width", type=float, default=0.068, help="sole's overall width [m]")
@@ -207,6 +245,18 @@ def main():
             report.append(f"WARNING: BoM line {pattern!r} matched no part")
     if unmatched:
         report.append(f"WARNING: no BoM mass for {sorted(set(unmatched))} (given zero mass)")
+    # The scale minus the BoM goes to the torso prints printed with settings not known for sure (TORSO_PRINTS),
+    # each scaled by the same factor: the legs, the lattice cover and the bought parts are sliced or listed
+    if args.total_mass:
+        geom_mass = {id(g): float(g.get("mass")) for _, g, _ in geoms if g.get("mass")}
+        rest = [g for part, g, _ in geoms if id(g) in geom_mass and re.match(TORSO_PRINTS, part)]
+        diff = args.total_mass / 1000 - sum(geom_mass.values()) - 2 * args.pad_mass / 1000
+        rest_mass = sum(geom_mass[id(g)] for g in rest)
+        k = 1 + diff / rest_mass
+        for g in rest:
+            g.set("mass", f"{geom_mass[id(g)] * k:.6g}")
+        report.append(f"torso prints (pelvis, battery door, head tray and shelf) x{k:.3f} ({1000 * rest_mass:.0f} -> {1000 * rest_mass * k:.0f} g) "
+                      f"for a {args.total_mass:g} g robot (weighed)")
     for mesh in root.find("asset").iter("mesh"):
         name = Path(mesh.get("file")).stem
         mesh.set("inertia", "shell" if re.search(SHELL_PARTS, name) else "convex")
@@ -287,8 +337,10 @@ def main():
         report.append(f"{foot}: rolled TPU sole {1000 * ext[0]:.0f} x {1000 * ext[1]:.0f} mm, flat {1000 * flat[0]:.0f} x "
                       f"{1000 * flat[1]:.0f} mm, {1000 * t:.1f} mm under the foot, edge up {1000 * args.roll_rise:.1f} mm, "
                       f"{args.pad_mass:g} g, friction {args.friction}")
+    if args.leg_collision == "box":
+        leg_boxes(model, data, bodies, report)
     radii = {}
-    for link, child in LEG_CAPSULES.items():
+    for link, child in (LEG_CAPSULES.items() if args.leg_collision == "capsule" else ()):
         bid, cid = model.body(link).id, model.body(child).id
         R, x = data.xmat[bid].reshape(3, 3), data.xpos[bid]
         a, b = data.xpos[bid], data.xpos[cid]
@@ -308,7 +360,7 @@ def main():
         ET.SubElement(bodies[link], "geom", name=f"{link}_capsule", type="capsule", size="0",
                       fromto=fmt(np.concatenate([R.T @ (p0 - x), R.T @ (p1 - x)])), density="0",
                       rgba="0.8 0.3 0.3 0.25", group="3")
-    for seg in ("thigh", "shin"):  # same radius on both legs: mirrored meshes differ slightly
+    for seg in ("thigh", "shin") if radii else ():  # same radius on both legs: mirrored meshes differ slightly
         r = np.mean([radii[f"{side}_{seg}_link"] for side in ("left", "right")])
         for side in ("left", "right"):
             next(g for g in bodies[f"{side}_{seg}_link"].findall("geom")

@@ -8,6 +8,7 @@ curve, command delay, gear slack and a zero-calibration error.
 The task itself lives in mdp/: commands, observations, rewards, terminations, events (domain
 randomization, pushes) and curricula. This class runs the simulation and calls them in order.
 """
+import os
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -155,7 +156,7 @@ def load_physics_model(path):
              "inertia": full.body_inertia.copy()}
         del full
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = cache.with_suffix(".tmp.npz")
+        tmp = cache.with_suffix(f".{os.getpid()}.tmp.npz")   # one per process: test workers compile a new model at once
         np.savez(tmp, **c)
         tmp.replace(cache)
     spec = mujoco.MjSpec.from_file(str(path))
