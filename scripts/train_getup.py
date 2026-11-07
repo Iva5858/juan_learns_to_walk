@@ -27,6 +27,8 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from train import parse_value  # noqa: E402  (scripts/train.py)
+
 import biped_rl  # noqa: E402,F401  (registers BipedGetUp-v0)
 from biped_rl.runs import RUNS, check_name, start_record, write_record  # noqa: E402
 from biped_rl.tasks.getup import GetUpEnv, GetUpStart, GetUpWeights, config  # noqa: E402
@@ -71,7 +73,7 @@ class GetUpVideo(BaseCallback):
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _on_step(self):
-        if self.num_timesteps - self.last < self.freq:
+        if not self.freq or self.num_timesteps - self.last < self.freq:   # 0: no videos
             return True
         self.last = self.num_timesteps
         norm = self.model.get_vec_normalize_env()
@@ -106,6 +108,9 @@ def main():
     p.add_argument("--weights", nargs="*", default=[], metavar="NAME=VALUE", help="reward weights (GetUpWeights)")
     p.add_argument("--start", nargs="*", default=[], metavar="NAME=VALUE", help="varied start poses (GetUpStart)")
     p.add_argument("--physics-from", help="a walking run whose physics randomization to train on (default: nominal robot)")
+    p.add_argument("--randomization", nargs="*", default=[], action="extend", metavar="NAME=VALUE",
+                   help="override randomization settings (after --physics-from), e.g. --randomization nominal_delay_range=1,4 "
+                        "(the nominal robot) or action_delay_steps=3,4 (randomized robots)")
     p.add_argument("--resume", help="a getup run to continue from (its policy and normalization)")
     p.add_argument("--min-std", type=float, default=0.2, help="with --resume: raise the exploration noise to at least this")
     p.add_argument("--lr", type=float, help="with --resume: learning rate (default: the run's own, 3e-4)")
@@ -129,6 +134,11 @@ def main():
             raise SystemExit(f"unknown start setting {k}: {', '.join(GetUpStart.__dataclass_fields__)}")
         start[k] = bool(int(v)) if k == "any_heading" else float(v)
     cfg = config(args.seconds, args.physics_from)
+    for item in args.randomization:
+        k, v = item.split("=")
+        if not hasattr(cfg.randomization, k):
+            raise SystemExit(f"unknown randomization setting: {k}")
+        setattr(cfg.randomization, k, parse_value(v))
     (run_dir / "config.json").write_text(json.dumps(cfg.to_dict(), indent=2))
     (run_dir / "getup.json").write_text(json.dumps({"weights": {**vars(GetUpWeights()), **weights},
                                                     "start": {**vars(GetUpStart()), **start}}, indent=2))
