@@ -49,7 +49,8 @@ ssh "$PI" "set -e; cd $DIR
 echo "=== 2/3 models and policies"
 rsync -az robot/models/ "$PI:$DIR/robot/models/"
 if [[ -f robot/policies/roles.json ]]; then
-    python3 scripts/policies.py --files | rsync -az --files-from=- robot/policies/ "$PI:$DIR/robot/policies/"
+    # roles.json too: the Pi's is git's, which names the roles of the last commit (their files may not be there)
+    { python3 scripts/policies.py --files; echo roles.json; } | rsync -az --files-from=- robot/policies/ "$PI:$DIR/robot/policies/"
     python3 scripts/policies.py | sed 's/^/   /'
 else
     rsync -az --include='*/' --include='*.npz' --exclude='*' robot/policies/ "$PI:$DIR/robot/policies/"   # with getup/
