@@ -81,7 +81,10 @@ def export(run, out):
         obs_err = max(obs_err, np.abs(ctrl.last_obs - obs[:env.actor_obs_dim]).max())
         sim_a = np.clip(model.predict(norm.normalize_obs(obs), deterministic=True)[0], -1, 1)
         act_err = max(act_err, np.abs(ctrl.last_action - sim_a).max())
-        obs, _, term, trunc, info = env.step(sim_a)
+        # The simulator runs the controller's own action, as the robot would: stepping it with PyTorch's instead fed
+        # each step's float32 rounding back through the action history, and a getup policy amplified that to
+        # ~2e-5 within 0.2 s (juan_getup_36: 2e-7 per step), failing the check on a difference no servo can show.
+        obs, _, term, trunc, info = env.step(ctrl.last_action)
         act_err = max(act_err, np.abs(ctrl.target - env.episode.target_buf[-1]).max())
         if up_at is None and env.episode.stood_for >= 0.5:
             up_at = env.episode.t

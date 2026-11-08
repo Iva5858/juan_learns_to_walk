@@ -105,7 +105,10 @@ def export(run, out):
             obs_err = max(obs_err, diff.max())
             sim_a = np.clip(model.predict(norm.normalize_obs(obs), deterministic=True)[0], -1, 1)
             act_err = max(act_err, np.abs(ctrl.last_action - sim_a).max())
-            obs, _, term, _, _ = env.step(sim_a)
+            # The simulator runs the controller's own action, as the robot would: stepping it with PyTorch's fed each
+            # step's float32 rounding back through the action history (juan_v7_34_final: 1.1e-6 after 2 s, as
+            # scripts/export_getup.py's getup policies did sooner), failing the check on no real difference.
+            obs, _, term, _, _ = env.step(ctrl.last_action)
             target_err = np.abs(ctrl.target - env.episode.target_buf[-1]).max()  # newest, before the delay
             act_err = max(act_err, target_err)
             if term:

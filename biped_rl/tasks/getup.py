@@ -232,7 +232,11 @@ class GetUpEnv(BipedEnv):
         info.update({"upright": upright, "height": height, "standing": float(standing), "settled": float(settled),
                      "stood_1s": float(ep.best_stood >= 1.0), "base_height": self.com_height(),
                      "idle": float(idle), "home_rms_deg": float(np.sqrt(np.mean(home_dev ** 2))), "idle_done": float(ep.idle_for >= IDLE_HOLD_S),
-                     "idle_at": ep.t if ep.idle_for >= IDLE_HOLD_S else float("nan")})
+                     "idle_at": ep.t if ep.idle_for >= IDLE_HOLD_S else float("nan"),
+                     # servo wear, as walking reports it (scripts/analysis/getup_handover.py sums it up)
+                     "load_fraction": float(s.load / self.frame_skip), "joint_reversals": s.reversals,
+                     "peak_torque_stall": float((s.peak_tau / self.cfg.robot.stall_torque).max()),
+                     "peak_force_bw": float(s.peak_force.max() / robot.weight)})
         return observations.compute(self), reward, finished, truncated, info
 
     def weights(self):

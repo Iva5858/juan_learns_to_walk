@@ -49,6 +49,7 @@ def main():
     p.add_argument("--joint-rad", type=float, default=0.5)
     p.add_argument("--stand-for", type=float, default=0.5, help="s on its feet before the walker takes over")
     p.add_argument("--at-idle", action="store_true", help="hand over when getup reaches idle (tasks/getup.py) instead")
+    p.add_argument("--json", help="save the counts and the wear numbers to this file")
     p.add_argument("--hold", type=float, default=5.0, help="s the walker must keep it standing")
     p.add_argument("--shove", type=float, default=0.0, help="m/s shove 2 s after the handover, random direction")
     p.add_argument("--video", help="folder for videos of the first 4 robots")
@@ -73,12 +74,17 @@ def main():
         Path(a.video).mkdir(parents=True, exist_ok=True)
 
     got_up, kept, times, fails = 0, 0, [], {}
+    wear = {"load": [], "reversals": [], "torque": 0.0, "impact": 0.0}   # servo wear while getting up, all robots
     for seed in range(a.seeds):
         frames = []
         obs, _ = g.reset(seed=seed)
         handed = None
         for i in range(g._max_steps):
-            obs, *_ = g.step(gm.predict(gn.normalize_obs(obs), deterministic=True)[0])
+            obs, _, _, _, info = g.step(gm.predict(gn.normalize_obs(obs), deterministic=True)[0])
+            wear["load"].append(info["load_fraction"])
+            wear["reversals"].append(info["joint_reversals"] / g.dt)
+            wear["torque"] = max(wear["torque"], info["peak_torque_stall"])
+            wear["impact"] = max(wear["impact"], info["peak_force_bw"])
             if a.video and seed < 4 and i % 2:
                 frames.append(g.render())
             if (getattr(g.episode, "idle_for", 0.0) >= 0.5) if a.at_idle else g.episode.stood_for >= a.stand_for:
@@ -116,7 +122,15 @@ def main():
             imageio.mimsave(Path(a.video) / f"robot{seed}.mp4", frames, fps=25, macro_block_size=1)
 
     n = a.seeds
-    print(f"\n{gdir.name} -> {Path(a.walker).name}: got up {got_up}/{n}, then kept standing {kept}/{n} "
+    load, rev = float(np.mean(wear["load"])), float(np.mean(wear["reversals"]))
+    print(f"\n{gdir.name} wear while getting up: load {load:.3f}  reversals {rev:.1f}/s  peak torque "
+          f"{wear['torque']:.2f}x stall  peak impact {wear['impact']:.1f}x body weight")
+    if a.json:
+        Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.json).write_text(json.dumps({"got_up": got_up, "kept": kept, "seeds": n, "fails": fails, "load": load,
+                                            "reversals_per_s": rev, "peak_torque": wear["torque"],
+                                            "peak_impact": wear["impact"]}, indent=2))
+    print(f"{gdir.name} -> {Path(a.walker).name}: got up {got_up}/{n}, then kept standing {kept}/{n} "
           f"({100 * kept / n:.0f}%); time to standing (incl. {a.stand_for} s on its feet) median "
           f"{np.median(times) if times else float('nan'):.2f} s; failures {fails}")
 

@@ -44,6 +44,16 @@ MOVES = {"back 0.10": (-0.10, 0, 0), "back 0.15": (-0.15, 0, 0), "left 0.10": (0
          "fwd 0.2 + R 0.4": (0.2, 0, -0.4)}   # (forward m/s, sideways m/s + = left, turn rad/s + = left)
 
 
+WEAR = ("load", "reversals_per_s", "power_w", "peak_torque", "peak_impact")   # servo wear (episode() says what)
+
+
+def wear_line(name, summary):
+    """The servo-wear numbers of one summary, for the report."""
+    S = summary
+    return (f"{name:28s} wear:  load {S['load']:.3f}  reversals {S['reversals_per_s']:.1f}/s  power {S['power_w']:.1f} W  "
+            f"peak torque {S['peak_torque']:.2f}x stall  peak impact {S['peak_impact']:.1f}x body weight")
+
+
 def episode(args):
     run, speed, seed, shoves, physics_from = args
     cmd = tuple(speed) if isinstance(speed, tuple) else (speed, 0.0, 0.0)
@@ -74,8 +84,13 @@ def episode(args):
     env.set_command(*cmd)
     y0, p0, yaws, lift, info = env.yaw(), env.data.qpos[:2].copy(), [], [], {}
     t0, steps, body, last = env.episode.t, 0, np.zeros(2), p0
+    wear = {"load": [], "reversals": 0.0, "power_w": [], "torque": 0.0, "impact": 0.0}
     for _ in range(int(WALK_S / env.dt)):
         obs, _, term, _, info = env.step(act(obs))
+        wear["load"].append(info["load_fraction"])
+        wear["reversals"] += info["joint_reversals"]
+        wear["power_w"].append(info["energy"] / env.dt)
+        wear["torque"], wear["impact"] = max(wear["torque"], info["peak_torque_stall"]), max(wear["impact"], info["peak_force_bw"])
         c, s = np.cos(env.yaw()), np.sin(env.yaw())   # this step's motion in the torso's own frame
         d, last = env.data.qpos[:2] - last, env.data.qpos[:2].copy()
         body += (c * d[0] + s * d[1], -s * d[0] + c * d[1])
@@ -94,7 +109,11 @@ def episode(args):
             "turn": abs(turn), "weave": weave, "steps_per_s": steps / t, "step_m": abs(fwd) / max(steps, 1),
             "lift_m": float(np.percentile(lift, 90)), "stand_tilt_deg": float(np.mean(tilt)),
             "stand_crouch_deg": float(np.mean(crouch)), "body_mps": (body / t).tolist(),
-            "turn_radps": float(np.unwrap([y0, *yaws])[-1] - y0) / t}
+            "turn_radps": float(np.unwrap([y0, *yaws])[-1] - y0) / t,
+            # servo wear while walking: mean (torque / stall)^2 summed over the joints, direction reversals per
+            # second (all joints), mean mechanical power, peak torque / stall, peak landing force / body weight
+            "load": float(np.mean(wear["load"])), "reversals_per_s": wear["reversals"] / t,
+            "power_w": float(np.mean(wear["power_w"])), "peak_torque": wear["torque"], "peak_impact": wear["impact"]}
 
 
 def measure(run, seeds, pool, physics_from=PHYSICS_FROM, speeds=SPEEDS):
@@ -114,7 +133,8 @@ def measure(run, seeds, pool, physics_from=PHYSICS_FROM, speeds=SPEEDS):
                        "falls": sum(e["fell"] for e in eps), "stops": sum(e["broke"] for e in eps), "episodes": len(eps),
                        "left_m": float(np.mean([abs(e["left"]) for e in done])), "turn_deg": mean("turn", done),
                        "weave_deg": mean("weave", done), "steps_per_s": mean("steps_per_s", done),
-                       "step_m": mean("step_m", done), "lift_m": mean("lift_m", done)}
+                       "step_m": mean("step_m", done), "lift_m": mean("lift_m", done),
+                       **{k: mean(k) for k in WEAR}}
         avg = lambda key, rows=rows: float(np.mean([r[key] for r in rows.values()]))
         out["shoves" if shoves else "calm"] = {
             "rows": {str(k): v for k, v in rows.items()}, "standing_falls": standing_falls,
@@ -123,7 +143,8 @@ def measure(run, seeds, pool, physics_from=PHYSICS_FROM, speeds=SPEEDS):
                         "weave_deg": avg("weave_deg"), "left_m": avg("left_m"),
                         "fast_speed": float(np.mean([r["speed"] for v, r in rows.items() if v >= 0.4] or [0.0])),
                         "stand_tilt_deg": float(np.mean([e["stand_tilt_deg"] for e in stood] or [0.0])),
-                        "stand_crouch_deg": float(np.mean([e["stand_crouch_deg"] for e in stood] or [0.0]))}}
+                        "stand_crouch_deg": float(np.mean([e["stand_crouch_deg"] for e in stood] or [0.0])),
+                        **{k: avg(k) for k in WEAR}}}
     return out
 
 
@@ -207,6 +228,7 @@ def main():
                       f"{s['episodes']} (+{m['standing_falls']} while standing), turn {s['turn_deg']:.1f}°, weave "
                       f"{s['weave_deg']:.1f}°, side {s['left_m']:.3f} m, speed at 0.4+ {s['fast_speed']:.3f} m/s, standing: tilt "
                       f"{s['stand_tilt_deg']:.1f}°, crouch {s['stand_crouch_deg']:.1f}°", flush=True)
+                print(wear_line(f"{Path(run).name} {mode}", s), flush=True)
             print()
     if a.verdict:
         for run in a.runs[1:]:
