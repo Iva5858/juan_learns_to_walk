@@ -19,7 +19,7 @@ import mujoco
 import numpy as np
 from gymnasium import spaces
 
-from biped_rl.robots import PROJECT, resolve_model_path
+from biped_rl.robots import PROJECT, juan, resolve_model_path
 from biped_rl.tasks.locomotion.env_cfg import EnvConfig
 from biped_rl.tasks.locomotion.mdp import commands, curriculums, events, observations, rewards, terminations
 
@@ -210,6 +210,7 @@ class BipedEnv(gym.Env):
         self.action_scale = np.broadcast_to(np.asarray(cfg.action_scale, dtype=np.float64), (self.nu,)).copy()
         self.smoothness_unit = self.action_scale / (cfg.smoothness_scale or self.action_scale)
         self.servo, self.domain = ServoState(), DomainState()
+        self._damping = self.model.dof_damping[self.robot.dof_idx].copy()   # the MJCF's joint damping (drive())
         events.set_nominal_physics(self)
         rc = cfg.randomization
         self.curriculum = CurriculumState(speed_max=cfg.command.speed_range[1],
@@ -412,11 +413,25 @@ class BipedEnv(gym.Env):
         if slack is not None:  # gear slack: no restoring torque until the gap is taken up
             err = np.sign(err) * np.maximum(np.abs(err) - slack, 0.0)
         tau = sv.kp * err - sv.kd * qd
-        # Linear torque-speed curve: no torque left at no-load speed.
+        # Linear torque-speed curve: no torque left at no-load speed; past it, braking (robot.overspeed_brake)
+        # or none.
         s = qd * inv_speed
-        upper = sv.stall * np.minimum(np.maximum(1.0 - s, 0.0), 1.0)
-        lower = -sv.stall * np.minimum(np.maximum(1.0 + s, 0.0), 1.0)
+        floor = -1.0 if self.cfg.robot.overspeed_brake else 0.0
+        upper = sv.stall * np.minimum(np.maximum(1.0 - s, floor), 1.0)
+        lower = -sv.stall * np.minimum(np.maximum(1.0 + s, floor), 1.0)
         return qd, tau, np.minimum(np.maximum(tau, lower), upper)
+
+    def drive(self, tau_c, qd):
+        """Apply the servo torque `tau_c` (servo_torque()) for the next physics step. With robot.overspeed_brake the
+        motor's speed-dependent part (stall / no-load speed per rad/s, the slope of the torque-speed line) goes to
+        MuJoCo as joint damping, which it integrates implicitly: the same torque as tau_c, but a light joint can't
+        overshoot within a 2 ms step (computed explicitly, a foot jumped 0 -> 8 rad/s in one step and the brake then
+        flipped sign every step)."""
+        if self.cfg.robot.overspeed_brake:
+            emf = self.servo.stall / self.servo.speed
+            self.model.dof_damping[self.robot.dof_idx] = self._damping + emf
+            tau_c = tau_c + emf * qd
+        self.data.ctrl[:] = tau_c
 
     def _actuate(self, action):
         """Filter the action, delay it like the servo bus, and run the servos at physics rate.
@@ -430,6 +445,9 @@ class BipedEnv(gym.Env):
         w = cfg.rewards
         slack = sv.backlash if sv.backlash.any() else None
         stall, inv_speed = sv.stall, 1.0 / sv.speed
+        # Gear stripping (break_joint_speed): judged against the rated speed when the motor's own is the fitted, slower
+        # one (robot.overspeed_brake): the gears are as strong as before, and the real joints reached 5.1 rad/s unharmed.
+        break_inv = 1.0 / juan.NO_LOAD_SPEED if cfg.robot.overspeed_brake else inv_speed
         loaded_overspeed = False
         peak_force, tau_sq, power, saturated = np.zeros(2), np.zeros(self.nu), np.zeros(self.nu), 0
         overload, overspeed, peak_tau = np.zeros(self.nu), np.zeros(self.nu), np.zeros(self.nu)
@@ -448,10 +466,10 @@ class BipedEnv(gym.Env):
             overspeed += np.maximum(speed_ratio - 1.0, 0.0)
             peak_speed_ratio = max(peak_speed_ratio, speed_ratio.max())
             # over-speed while the servo fights it: gear-stripping load
-            loaded_overspeed |= bool(np.any((speed_ratio > w.break_joint_speed)
+            loaded_overspeed |= bool(np.any((np.abs(qd) * break_inv > w.break_joint_speed)
                                             & (np.abs(tau_c) > w.break_requires_load * stall)))
             peak_tau = np.maximum(peak_tau, np.abs(tau_c))
-            d.ctrl[:] = tau_c
+            self.drive(tau_c, qd)
             mujoco.mj_step(m, d)
             peak_force = np.maximum(peak_force, self.foot_forces())
         return SimpleNamespace(peak_force=peak_force, saturated=saturated, overload=overload, overspeed=overspeed,
@@ -709,8 +727,8 @@ class BipedEnv(gym.Env):
         self.episode.target = np.clip(joints, robot.joint_lo, robot.joint_hi)
         slack = sv.backlash if sv.backlash.any() else None
         for _ in range(self.frame_skip):
-            *_, tau_c = self.servo_torque(self.episode.target, slack, 1.0 / sv.speed)
-            self.data.ctrl[:] = tau_c
+            qd, _, tau_c = self.servo_torque(self.episode.target, slack, 1.0 / sv.speed)
+            self.drive(tau_c, qd)
             mujoco.mj_step(self.model, self.data)
         return not (self.non_foot_ground_contact() or self.gravity_body()[2] > -0.6)
 

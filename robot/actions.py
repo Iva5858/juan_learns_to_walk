@@ -138,12 +138,13 @@ def policy_start(robot, name):
     return robot.walker.start(name)
 
 
-@action("policy/getup", "Get up", "drive", getup=str, walker=str,
+@action("policy/getup", "Get up", "drive", getup=str, walker=(str, None),
         confirm="Get up? Place the robot face down (as in training), harness on, hands clear: the legs move fast "
-                "and with full force. Once up, the walking policy takes over, standing.")
+                "and with full force. One try: not up within 6 s, or falling once up, relaxes the servos.")
 def policy_getup(robot, getup, walker):
-    """From lying face down: a getup policy (robot/policies/getup/) until up, then a walking policy, standing."""
-    return robot.walker.start_getup(getup, walker)
+    """From lying face down: a getup policy (robot/policies/getup/) until up, then a walking policy, standing;
+    without a walker, the getup policy keeps it standing (30 s, then hold)."""
+    return robot.walker.start_getup(getup, walker or None)
 
 
 @action("policy/stop", "Stop (hold)", "drive", danger=True, why=(str, None))

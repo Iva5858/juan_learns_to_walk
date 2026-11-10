@@ -36,3 +36,9 @@ KD = 0.2              # Nm*s/rad (estimate)
 # A policy trained on the estimate weaves on the real robot. EnvConfig.use_measured_servos().
 MEASURED_KP = 30.0
 MEASURED_DELAY_STEPS = (3, 4)   # whole 20 ms control steps, plus 5-19 ms latency within the step
+# Speed, from the getup logs of 2026-11-08 (4 logs; walking never reaches it, so its logs can't tell): the joints
+# never passed 5.1 rad/s; replayed, no-load 4.0-4.5 rad/s with braking past it (RobotConfig.overspeed_brake) fits
+# best, 4.7 deg rms joint error against 7.2-7.5 for 5.8 rad/s without braking.
+MEASURED_NO_LOAD_SPEED = 4.3
+# Stall torque: the datasheet's 3.43 Nm taken as true, less a margin (never measured on Juan; the getup is a strength task)
+MEASURED_STALL_TORQUE = 3.2

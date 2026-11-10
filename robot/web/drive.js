@@ -41,7 +41,8 @@ export function build(root) {
         <div class="row">
           <span class="sub">Lying face down:</span>
           <select id="dGetup" style="flex:1;min-width:0"></select>
-          <button class="go" id="dGetupBtn" title="Getup policy until up, then the walking policy above takes over, standing">Get up</button>
+          <label class="sub" title="Once up, the walking policy above takes over, standing; unticked, the getup policy keeps it standing (30 s)"><input type="checkbox" id="dGetupWalk"> then walker</label>
+          <button class="go" id="dGetupBtn" title="Getup policy until up (one try, 6 s), then standing">Get up</button>
         </div>
         <div class="row">
           <span class="sub">Before starting:</span>
@@ -117,7 +118,7 @@ export function build(root) {
   $('dStickHold').onchange = e => { st.stickHold = e.target.checked; };
   $('dMs').onchange = e => call('policy/move_ms', {ms: +e.target.value});
   $('dStart').onclick = start;
-  $('dGetupBtn').onclick = () => { standStill(); call('policy/getup', {getup: $('dGetup').value, walker: $('dPolicy').value}); };
+  $('dGetupBtn').onclick = () => { standStill(); call('policy/getup', {getup: $('dGetup').value, walker: $('dGetupWalk').checked ? $('dPolicy').value : null}); };
   $('dStop').onclick = () => call('policy/stop');
   $('dPickup').onclick = () => call('policy/stop', {why: 'pickup'});
   $('dBoot').onclick = () => call('boot');

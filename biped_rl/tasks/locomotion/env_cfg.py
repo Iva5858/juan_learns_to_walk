@@ -21,6 +21,10 @@ class RobotConfig:
     # actuator type does not matter.
     stall_torque: float = juan.STALL_TORQUE
     no_load_speed: float = juan.NO_LOAD_SPEED
+    # Past no-load speed the motor's back-voltage exceeds the battery's and it brakes (the torque-speed line
+    # continues below 0). Off, a joint carried by momentum spins free: getup_36 swung knees at 11 rad/s in sim,
+    # the real servos never passed 5.1 (robot logs 2026-11-08). On with use_measured_servos() and for getup.
+    overspeed_brake: bool = False
     kp: float = juan.KP
     kd: float = juan.KD
     # Joints used by posture terms and the mirror map (names in the MJCF; missing names are skipped).
@@ -338,5 +342,8 @@ class EnvConfig:
         """The servo model fitted from the real robot (biped_rl/robots/juan.py), to test how a policy
         will do on it."""
         self.robot.kp = juan.MEASURED_KP
+        self.robot.no_load_speed = juan.MEASURED_NO_LOAD_SPEED
+        self.robot.stall_torque = juan.MEASURED_STALL_TORQUE
+        self.robot.overspeed_brake = True
         self.randomization.action_delay_steps = juan.MEASURED_DELAY_STEPS
         return self

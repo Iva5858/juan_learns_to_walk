@@ -35,7 +35,7 @@ def play(cfg, keys, seed, video=None):
         env.episode.target = np.clip(target, env.robot.joint_lo, env.robot.joint_hi)
         for _ in range(env.frame_skip):
             qd, tau, tau_c = env.servo_torque(env.episode.target, slack, 1.0 / sv.speed)
-            d.ctrl[:] = tau_c
+            env.drive(tau_c, qd)
             mujoco.mj_step(m, d)
             peak_tau = max(peak_tau, float(np.max(np.abs(tau_c) / sv.stall)))
             peak_speed = max(peak_speed, float(np.max(np.abs(qd) / sv.speed)))

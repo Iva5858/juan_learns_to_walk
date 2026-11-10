@@ -155,6 +155,28 @@ def test_getup_then_walker_hands_over_when_upright(tmp_path):
     shutil.rmtree(tmp_path, ignore_errors=True)
 
 
+def test_getup_only_keeps_the_getup_policy_standing(tmp_path, monkeypatch):
+    """Without a walker, the getup policy stays on once up ("hold"), refuses commands, and stops after GETUP_HOLD_S
+    holding (not relaxed: it is standing)."""
+    import shutil
+
+    from robot import walker as W
+    monkeypatch.setattr(W, "GETUP_HOLD_S", 0.5)
+    cal = str(tmp_path / "calibration.json")
+    robot = Robot(fake.hardware(cal), cal)
+    robot.walker.log_dir = str(tmp_path)
+    getups = W.getup_policies()
+    if not getups:
+        pytest.skip("no getup policy exported (scripts/export_getup.py)")
+    time.sleep(0.5)
+    assert robot.walker.start_getup(getups[0], None) is None
+    time.sleep(W.UP_HOLD_S + 0.3)
+    assert robot.walker.phase == "hold" and robot.walker.running and robot.walker.set_command(0.1, 0, 0)
+    time.sleep(1.0)
+    assert not robot.walker.running and "holding" in robot.walker.status
+    shutil.rmtree(tmp_path, ignore_errors=True)
+
+
 def _fake_robot(tmp_path, monkeypatch):
     from robot import body
     monkeypatch.setattr(body, "SHUTDOWN_MS", (50, 100, 20))

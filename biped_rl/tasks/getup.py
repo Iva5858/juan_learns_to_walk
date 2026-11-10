@@ -49,6 +49,9 @@ class GetUpWeights:
                                         # (upright 1, lying 0.5, upside down 0): juan_getup_4 stood on its head
                                         # with its legs in the air, its centre of mass higher than kneeling
     standing: float = 3.0      # upright (> 0.85), high (> 0.75) and only the feet on the ground
+    standing_tilt_deg: float = 0.0  # >0: standing also needs the torso within this of upright (0: upright > 0.85, ~32 deg).
+                                    # juan_getup_38 ended leaning 22-33 deg, wobbling: "standing" for a walker's
+                                    # takeover, never "up" for the robot (robot/walker.py: within 15 deg)
     strict_standing: float = 0.0   # 1: standing also needs both feet down and under 0.2 m/s across the floor
                                    # (juan_getup_9 lunged and bounded on one foot at up to 1.7 m/s: "standing",
                                    # and no walker could take over). A knee bent backwards is allowed: every
@@ -94,6 +97,9 @@ def config(episode_seconds=6.0, physics_from=None):
     cfg.action_scale = list(GETUP_ACTION_SCALE)
     cfg.episode_seconds = episode_seconds
     cfg.robot.kp = juan.MEASURED_KP
+    cfg.robot.no_load_speed = juan.MEASURED_NO_LOAD_SPEED   # the real servos' speed, and their braking past it:
+    cfg.robot.overspeed_brake = True                         # getup_36 flung its legs at 2x it in sim, failed on the robot
+    cfg.robot.stall_torque = juan.MEASURED_STALL_TORQUE      # the datasheet's, less a margin
     if physics_from:
         cfg.randomization = EnvConfig.load(physics_from).randomization
         r = cfg.randomization
@@ -186,6 +192,8 @@ class GetUpEnv(BipedEnv):
         height = float(np.clip((self.com_height() - self.lying_height) / (robot.home_height - self.lying_height), 0.0, 1.2))
         on_feet = not s.bad_contact and ep.contact.sum() >= 1
         standing = upright > 0.85 and height > 0.75 and on_feet
+        if w.standing_tilt_deg:
+            standing = standing and upright > np.cos(np.radians(w.standing_tilt_deg))
         if w.strict_standing:
             standing = standing and ep.contact.sum() == 2 and np.linalg.norm(self.data.qvel[:2]) < 0.2
         if w.flat_feet:

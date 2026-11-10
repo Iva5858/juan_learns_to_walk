@@ -25,7 +25,8 @@ def test_lying_still_earns_nothing_and_never_ends_early():
         assert not terminated
         if truncated:
             break
-    assert steps == int(1.0 / env.dt) and abs(total) < 1e-3 and info["standing"] == 0
+    # ~0 (the measured servos settle the legs into a slight height reward, 0.0016 in 1 s; standing earns > 0.1 a step)
+    assert steps == int(1.0 / env.dt) and abs(total) < 1e-2 and info["standing"] == 0
 
 
 def test_standing_at_home_earns_the_most():

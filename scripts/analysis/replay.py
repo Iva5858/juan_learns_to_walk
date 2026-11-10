@@ -84,7 +84,8 @@ def replay_window(env, log, k0, n, delay, servo):
         for s in range(env.frame_skip):
             if s == lat:
                 target = new
-            d.ctrl[:] = env.servo_torque(target, None, 1.0 / sv.speed)[2]
+            qd, _, tau_c = env.servo_torque(target, None, 1.0 / sv.speed)
+            env.drive(tau_c, qd)
             mujoco.mj_step(env.model, d)
         sim_q.append(d.qpos[robot.qpos_idx].copy())
         sim_g.append(env.gravity_body())
