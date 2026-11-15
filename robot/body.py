@@ -391,7 +391,8 @@ class Robot:
                        age=time.time() - st["t"])
         fast_part = {"mode": self.mode(), "joints": joints, "message": self.message, "hot": self.hot,
                      "pi_hot": self.pi_hot, "zero_set": self.cal.zero_set, "imu": imu, "imu_error": self.imu.error,
-                     "walker": self.walker.state(), "gesture": self.personality.gesture, "t": time.time()}
+                     "walker": self.walker.state(), "gesture": self.personality.gesture, "t": time.time(),
+                     "sim": self.hw.sim.scene() if getattr(self.hw, "sim", None) else None}
         if fast:
             return fast_part
         return {

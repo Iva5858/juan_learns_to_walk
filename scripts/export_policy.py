@@ -26,6 +26,7 @@ from robot.policy import Controller, Policy
 
 # (seconds, forward, sideways, turn): the closed-loop check
 SCRIPT = [(2, 0, 0, 0), (4, 0.3, 0, 0), (3, 0.2, 0, 0.4), (3, 0, 0.1, 0), (2, -0.1, 0, 0), (2, 0, 0, 0)]
+GO_SCRIPT = [(10, 1.0, 0, 0)]   # free-run policies (CommandConfig.go_command) know only "go": they never learned to stand
 
 
 def top_speed(run, c):
@@ -91,7 +92,7 @@ def export(run, out):
     ctrl.start(env.robot_readings(), phase=env.command.phase)
     obs_err = act_err = 0.0
     fell = False
-    for seconds, vx, vy, wz in SCRIPT:
+    for seconds, vx, vy, wz in GO_SCRIPT if cfg.command.go_command else SCRIPT:
         env.set_command(vx, vy, wz)
         ctrl.set_command(vx, vy, wz)
         obs = observations.compute(env)  # the sim's observation with the new command

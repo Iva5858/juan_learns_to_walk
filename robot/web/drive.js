@@ -5,6 +5,7 @@
 //   * turning and side-stepping last while held (keys, buttons, the joystick's sideways axis, a gamepad).
 // The robot caps the command to what the policy was trained for; the page shows both.
 import {$, R, battery, call, esc, has, n1, onState} from './core.js';
+import {DETAILS, View3D} from './view3d.js';
 
 const RAMP = 0.2;                 // m/s per second while up / down is held
 const DECEL = 0.5;                // m/s per second at most when slowing down or stopping: the robot logs of
@@ -76,6 +77,37 @@ export function build(root) {
       </div>
     </div>
     <div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="row"><b>3D</b>
+          <select id="d3Detail" title="How much of the model to draw (remembered in this browser)">
+            ${DETAILS.map(d => `<option value="${d}">${d}</option>`).join('')}</select>
+          <label class="sub"><input type="checkbox" id="d3Follow" checked> follow</label>
+          <button class="small" id="d3Home">Reset view</button>
+          <span class="sub" id="d3Note"></span></div>
+        <div id="d3" style="height:min(360px,60vw)"></div>
+      </div>
+      <div class="card" id="dSim" style="margin-bottom:12px" hidden>
+        <div class="row"><b>Simulator</b><span class="sub" id="dSimNote"></span></div>
+        <div class="row"><span class="sub">Reset to</span>
+          <button class="small" data-simpose="home">Home</button><button class="small" data-simpose="straight">Straight</button>
+          <button class="small" data-simpose="face_down">Face down</button></div>
+        <div class="row"><span class="sub">Robot</span>
+          <select id="dSimPhysics"><option value="nominal">nominal</option><option value="measured">measured servos</option>
+            <option value="randomized">randomized</option></select>
+          <label class="sub">seed <input type="number" id="dSimSeed" value="0" min="0" style="width:64px"></label>
+          <button class="small" id="dSimApply">Apply</button></div>
+        <div class="row"><span class="sub">Shove</span>
+          <select id="dSimShove"><option>0.2</option><option selected>0.4</option><option>0.6</option><option>0.8</option></select>
+          <span class="sub">m/s</span>
+          <button class="small" data-shove="1,0">fwd</button><button class="small" data-shove="-1,0">back</button>
+          <button class="small" data-shove="0,1">left</button><button class="small" data-shove="0,-1">right</button></div>
+        <div class="row"><span class="sub">Time</span>
+          <select id="dSimSpeed"><option value="1">real time</option><option value="0.5">0.5x</option><option value="0.25">0.25x</option>
+            <option value="0.1">0.1x</option></select>
+          <button class="small" id="dSimPause">Pause</button>
+          <span class="sub">Camera</span>
+          <select id="dSimView"><option value="chase">chase</option><option value="head">Juan's head</option></select></div>
+      </div>
       <div class="card">
         <div class="stickrow">
           <div class="stick" id="dStick"><div class="knob" id="dKnob"></div>
@@ -129,6 +161,20 @@ export function build(root) {
   joystick($('dStick'), $('dKnob'));
   $('dCamBtn').onclick = () => camera(!camOn);
   $('dCamView').onchange = () => camera(camOn);
+  view = new View3D($('d3'));
+  $('d3Detail').value = view.detail;
+  $('d3Detail').onchange = e => view.setDetail(e.target.value);
+  $('d3Follow').onchange = e => { view.follow = e.target.checked; };
+  $('d3Home').onclick = () => view.home();
+  for (const b of root.querySelectorAll('[data-simpose]')) b.onclick = () => { standStill(); call('sim/reset', {pose: b.dataset.simpose}); };
+  $('dSimApply').onclick = () => { standStill(); call('sim/physics', {physics: $('dSimPhysics').value, seed: +$('dSimSeed').value}); };
+  for (const b of root.querySelectorAll('[data-shove]')) b.onclick = () => {
+    const [f, l] = b.dataset.shove.split(',').map(Number), v = +$('dSimShove').value;
+    call('sim/shove', {forward: f * v, left: l * v});
+  };
+  $('dSimSpeed').onchange = () => call('sim/pause', {on: !!(R.S && R.S.sim && R.S.sim.paused), speed: +$('dSimSpeed').value});
+  $('dSimPause').onclick = () => call('sim/pause', {on: !(R.S && R.S.sim && R.S.sim.paused), speed: +$('dSimSpeed').value});
+  $('dSimView').onchange = () => call('sim/view', {view: $('dSimView').value});
   document.addEventListener('keydown', keydown);
   document.addEventListener('keyup', keyup);
   window.addEventListener('blur', releaseAll);
@@ -285,6 +331,7 @@ function vitals(S) {
 }
 
 // ---- state ----
+let view = null;      // the 3D view
 let camOn = false;
 function camera(on) {
   camOn = on;
@@ -297,6 +344,16 @@ function camera(on) {
 onState((S, full) => {
   const w = S.walker;
   vitals(S);
+  if (view) view.update(S);
+  $('dSim').hidden = !S.sim;
+  if (S.sim) {
+    $('dSimNote').textContent = `${S.sim.physics}${S.sim.physics === 'randomized' ? ' #' + S.sim.seed : ''} · ${n1(S.sim.t, 1)} s`
+      + (S.sim.paused ? ' · paused' : '') + (S.sim.fallen ? ' · fallen' : '');
+    $('dSimPause').textContent = S.sim.paused ? 'Resume' : 'Pause';
+    if (full && document.activeElement !== $('dSimPhysics')) $('dSimPhysics').value = S.sim.physics;
+    if (full && document.activeElement !== $('dSimView')) $('dSimView').value = S.sim.view;
+  }
+  $('d3Note').textContent = S.sim ? 'simulated' : 'tilt and heading from the IMU';
   if (full) {
     const sel = $('dPolicy');
     const gs = $('dGetup'), gp = w.getup_policies || [];

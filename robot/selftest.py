@@ -98,7 +98,7 @@ def servos(ports):
     report("FAIL" if dup else "PASS", "each ID on one bus only", f"duplicates: {dup}" if dup else "")
     missing = sorted(set(BY_ID) - set(found))
     report("FAIL" if missing else "PASS", "all 8 servos answer", f"missing {missing}" if missing else "")
-    for bus in buses:
+    for bus in buses if len(buses) > 1 else []:   # one BusLinker for all 8 is the usual setup; two: one leg each
         legs = {"left" if sid <= 4 else "right" for sid in bus.ids}
         report("PASS" if len(legs) == 1 else "FAIL", f"{bus.port} carries one leg",
                ", ".join(sorted(legs)) + ("" if len(legs) == 1 else ": IDs 1-4 = left leg, 5-8 = right leg"))

@@ -44,6 +44,8 @@ uv sync && source .venv/bin/activate          # Python 3.11, exact versions from
 pytest -q                                     # ~15 s, all must pass (CI: ruff + pytest on every push)
 ruff check .                                  # line length 150
 python -m robot.dashboard --fake              # the dashboard on stand-in hardware, http://localhost:8000
+python -m robot.dashboard --sim               # the dashboard driving Juan in MuJoCo (robot/sim.py; Mac only)
+python scripts/model/web_model.py             # the 3D view's model (robot/web/model/), after juan/ changes
 python scripts/analysis/walk_test.py runs/v7/<a> runs/v7/<b> --verdict     # judge a walker against another
 python scripts/analysis/walk_test.py runs/v7/<a> --moves                   # backward, sideways, turning
 ```

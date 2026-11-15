@@ -5,6 +5,7 @@ work; robot/actions.py lists everything the page can ask for).
 Run on the Pi, from the project folder:   python3 -m robot.dashboard
 Then open                                  http://<pi-name>.local:8000
 Without the robot (any computer):          python3 -m robot.dashboard --fake     (http://localhost:8000)
+Juan in the simulator (the Mac, MuJoCo):   python -m robot.dashboard --sim      (robot/sim.py)
 
     GET  /api/state             everything, once
     GET  /api/events            the state, pushed (Server-Sent Events): "fast" 10 times a second (joints,
@@ -177,10 +178,20 @@ def main():
     global robot
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--fake", action="store_true", help="stand-in hardware (robot/fake.py): no robot needed")
+    p.add_argument("--sim", action="store_true", help="simulated hardware (robot/sim.py: MuJoCo, on a computer)")
+    p.add_argument("--physics", default="measured", help="with --sim: nominal, measured or randomized")
+    p.add_argument("--seed", type=int, default=0, help="with --sim --physics randomized: which robot")
     p.add_argument("--port", type=int, default=PORT)
     a = p.parse_args()
     server = serve(a.port)
-    if a.fake:
+    if a.sim:
+        from robot import sim
+        sim_dir = os.path.join(HERE, "logs", "sim")   # its calibration and walk logs
+        os.makedirs(sim_dir, exist_ok=True)
+        cal_path = os.path.join(sim_dir, "calibration.json")
+        robot = Robot(sim.hardware(cal_path, a.physics, a.seed), cal_path)
+        robot.walker.log_dir = sim_dir
+    elif a.fake:
         from robot import fake
         fake_dir = os.path.join(HERE, "logs", "fake")   # its calibration and walk logs
         os.makedirs(fake_dir, exist_ok=True)
@@ -196,9 +207,9 @@ def main():
     if missing:
         print(f"Not found: servos {', '.join(map(str, missing))}")
     print(f"Calibration: {'zero set' if robot.cal.zero_set else 'NOT calibrated yet (set zero first)'}"
-          + (f" ({robot.cal_path}: the fake robot's own)" if a.fake else ""))
+          + (f" ({robot.cal_path}: the {'simulated' if a.sim else 'fake'} robot's own)" if a.fake or a.sim else ""))
     print(f"Protection:  servos relax above {SERVO_TEMP_LIMIT} C, everything relaxes if the Pi reaches {PI_TEMP_LIMIT} C")
-    host = "localhost" if a.fake else socket.gethostname().removesuffix(".local") + ".local"
+    host = "localhost" if a.fake or a.sim else socket.gethostname().removesuffix(".local") + ".local"
     print(f"Dashboard:   http://{host}:{a.port}   (Ctrl+C: squat, relax, exit)")
     try:
         server.serve_forever()
