@@ -175,7 +175,9 @@ class Robot:
             self.walker.stop("stopped: dashboard shut down")
             if self.walker.thread is not None:
                 self.walker.thread.join(timeout=5.0)
+            self.personality.set_follow(False)
             self.personality.set_faces(False)
+            self.personality.set_emotions(False)
             self.personality.set_listening(False)
             why = self._why_no_squat()
             if why is None:

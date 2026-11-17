@@ -3,17 +3,19 @@
 #   1. the code: the Pi checks out the same branch and pulls it from GitHub (push it first);
 #      the Pi's own robot/calibration.json is kept whatever the branch holds;
 #   2. what git doesn't carry: the speech and face models (robot/models/) and the policies that have a role in
-#      robot/policies/roles.json (walk, speed, getup: scripts/policies.py), committed or not; the rest of the
+#      robot/policies/roles.json (walk, speed, follow, getup: scripts/policies.py), committed or not; the rest of the
 #      exports stay on this computer (without roles.json: every exported policy, as before);
 #   3. with --install, the Pi packages for voice and faces (OpenCV, Vosk, sounddevice; asks for sudo).
 # It doesn't start anything: run python3 -m robot.dashboard on the Pi afterwards.
 #
-#   ./scripts/deploy_pi.sh                    # code + models + policies
-#   ./scripts/deploy_pi.sh --install          # + install the voice and face packages on the Pi
-#   PI=iva585@192.168.1.42 ./scripts/deploy_pi.sh     # if juanpi.local doesn't resolve
+# PI is the ssh login of YOUR Raspberry Pi (user@host). There is no default: without PI the script stops.
+#
+#   PI=<user>@<your-pi>.local ./scripts/deploy_pi.sh             # code + models + policies
+#   PI=<user>@<your-pi>.local ./scripts/deploy_pi.sh --install   # + install the voice and face packages on the Pi
+#   PI=<user>@<ip address> ./scripts/deploy_pi.sh                # if <your-pi>.local doesn't resolve
 set -euo pipefail
 cd "$(dirname "$0")/.."
-PI=${PI:-iva585@juanpi.local}
+PI=${PI:?set PI to your own Raspberry Pi, e.g. PI=<user>@<your-pi>.local ./scripts/deploy_pi.sh}
 DIR=${DIR:-juan_learns_to_walk}
 BRANCH=${BRANCH:-$(git branch --show-current)}
 

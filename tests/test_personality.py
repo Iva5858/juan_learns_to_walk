@@ -30,6 +30,7 @@ class FakeWalker:
         self.running = running
         self.ctrl = SimpleNamespace(command=np.zeros(3))
         self.stopped = None
+        self.steer_owner, self.phase = None, "walk"
 
     def set_command(self, vx, vy, wz, source="page"):
         self.ctrl.command = np.array([vx, vy, wz])

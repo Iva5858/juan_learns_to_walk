@@ -15,7 +15,7 @@ model, saved as robot/models/face_detection_yunet_2023mar.onnx:
 import os
 import threading
 import time
-from collections import deque
+from collections import deque, namedtuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = os.path.join(HERE, "models", "face_detection_yunet_2023mar.onnx")
@@ -23,6 +23,9 @@ DETECT_SIZE = (320, 240)  # frames are shrunk to this before detection
 MIN_SCORE = 0.75
 ABSENT_S = 3.0            # a face must have been gone this long for the next one to count as new
 COOLDOWN_S = 20.0         # at most one greeting this often
+
+# A face in an image's pixels: box, score, and 5 landmarks (eyes, nose tip, mouth corners) as (x, y) pairs
+Face = namedtuple("Face", "x y w h score landmarks")
 
 
 class FaceDetector:
@@ -34,24 +37,26 @@ class FaceDetector:
         self.net = cv2.FaceDetectorYN.create(model, "", DETECT_SIZE, MIN_SCORE)
 
     def detect(self, image):
-        """Faces in a BGR image as (x, y, w, h, score) in that image's pixels, largest first."""
+        """Faces in a BGR image (Face: box, score, landmarks) in that image's pixels, largest first."""
         h, w = image.shape[:2]
         small = self.cv2.resize(image, DETECT_SIZE)
         _, found = self.net.detect(small)
         if found is None:
             return []
         sx, sy = w / DETECT_SIZE[0], h / DETECT_SIZE[1]
-        faces = [(f[0] * sx, f[1] * sy, f[2] * sx, f[3] * sy, float(f[14])) for f in found]
-        return sorted(faces, key=lambda f: -f[2] * f[3])
+        faces = [Face(f[0] * sx, f[1] * sy, f[2] * sx, f[3] * sy, float(f[14]),
+                      [(f[4 + 2 * i] * sx, f[5 + 2 * i] * sy) for i in range(5)]) for f in found]
+        return sorted(faces, key=lambda f: -f.w * f.h)
 
 
 class FaceWatcher:
     """Reads frames from `frames()` (an iterator of BGR images) in a background thread, at most `fps`
-    a second, and calls on_greet(face) when a face appears. With frames=None, feed it with step()."""
+    a second, and calls on_greet(face) when a face appears, and on_frame(image, faces) on every frame read
+    (robot/emotions.py reads the expression there). With frames=None, feed it with step()."""
 
-    def __init__(self, frames, on_greet, fps=4.0, detector=None):
+    def __init__(self, frames, on_greet, fps=4.0, detector=None, on_frame=None):
         self.detector = detector or FaceDetector()
-        self.frames, self.on_greet, self.period = frames, on_greet, 1.0 / fps
+        self.frames, self.on_greet, self.on_frame, self.period = frames, on_greet, on_frame, 1.0 / fps
         self.faces, self.last_seen, self.last_greet = [], 0.0, -COOLDOWN_S
         self.error = None
         self.running = True
@@ -71,6 +76,8 @@ class FaceWatcher:
                 self.last_greet = now
                 self.on_greet(faces[0])
             self.last_seen = now
+        if self.on_frame:
+            self.on_frame(image, faces)
         return faces
 
     def _loop(self):
@@ -132,7 +139,7 @@ if __name__ == "__main__":
         if time.monotonic() - last >= 0.25:
             last = time.monotonic()
             watcher.step(frame)
-        for x, y, w, h, s in watcher.faces:
+        for x, y, w, h, s, _ in watcher.faces:
             cv2.rectangle(frame, (int(x), int(y)), (int(x + w), int(y + h)), (80, 200, 80), 2)
             cv2.putText(frame, f"{s:.2f}", (int(x), int(y) - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 200, 80), 1)
         if greeted and time.monotonic() - greeted[-1] < 1.5:

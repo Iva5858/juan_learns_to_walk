@@ -8,6 +8,9 @@
   * Reactions: a "whoa" when the robot is bumped (gyro spike), a sleepy whine when the battery is
     low, and sounds when the walking policy starts, stops or the robot falls.
   * Greeting faces (robot/faces.py): a happy bounce and chirp when someone appears, if standing idle.
+  * Reacting to expressions (robot/emotions.py): happy -> happy bounce, sad -> sad, surprised -> excited, if
+    standing idle; the sound only while walking. Shares the face watcher with greeting.
+  * Following a person (robot/follow.py): steers the running walking policy toward the nearest person.
   * Voice commands (robot/voice_commands.py, needs a microphone): steer the running walking policy,
     play gestures, answer in chord speech. Voice never starts the walking policy.
   * Victory spin: turn in place a full circle with the walking policy, stop, then a happy bounce.
@@ -41,8 +44,11 @@ class Personality:
         self.last_activity = time.monotonic()
         self._next_idle = random.uniform(*IDLE_EVERY_S)
         self._last_bump = self._last_battery = 0.0
-        self.faces = self.listener = None
-        self.faces_error = self.listener_error = None
+        self.faces = self.listener = self.follower = None
+        self.faces_error = self.listener_error = self.follow_error = None
+        self.greeting = self.reading = False           # what the face watcher is for
+        self.reader = self.mood = None                 # robot/emotions.py, loaded on first use
+        self.reaction = None                           # (expression, what Juan did, time) of the last reaction
         self.spinning = False
         threading.Thread(target=self._watch, daemon=True).start()
 
@@ -171,10 +177,27 @@ class Personality:
                     self.voice.say("chirp")
                 self._next_idle = random.uniform(*IDLE_EVERY_S)
 
-    # ---- faces, voice commands, victory spin ----
+    # ---- faces, expressions, following, voice commands, victory spin ----
     def set_faces(self, on):
         """Greet people the camera sees (robot/faces.py)."""
-        if not on:
+        self.greeting = bool(on)
+        return self._watch_faces()
+
+    def set_emotions(self, on):
+        """React to the nearest face's expression (robot/emotions.py)."""
+        if on and self.reader is None:
+            try:
+                from robot.emotions import EmotionReader, EmotionTracker
+                self.reader, self.mood = EmotionReader(), EmotionTracker()
+            except Exception as e:  # no OpenCV, no model
+                self.faces_error = str(e)[:200]
+                return self.faces_error
+        self.reading = bool(on)
+        return self._watch_faces()
+
+    def _watch_faces(self):
+        """One face watcher (one detector reading the camera) while greeting or reading expressions."""
+        if not (self.greeting or self.reading):
             if self.faces:
                 self.faces.stop()
             self.faces = None
@@ -183,18 +206,67 @@ class Personality:
             return None
         try:
             from robot.faces import FaceWatcher, jpeg_frames
-            self.faces = FaceWatcher(lambda: jpeg_frames(self.robot.camera.stream()), self._greet)
+            self.faces = FaceWatcher(lambda: jpeg_frames(self.robot.camera.stream()), self._greet,
+                                     on_frame=self._read_face)
             self.faces_error = None
         except Exception as e:  # no OpenCV, no model, no camera
             self.faces_error = str(e)[:200]
+            self.greeting = self.reading = False
         return self.faces_error
 
     def _greet(self, face):
+        if not self.greeting:
+            return
         self.last_activity = time.monotonic()
         if self._idle():
             self.play("happy_bounce")  # (its own happy chirp)
         else:
             self.voice.say("happy")
+
+    def _read_face(self, image, faces):
+        if not self.reading:
+            return
+        from robot.emotions import REACTIONS, SOUNDS
+        expression = self.mood.update(self.reader.read(image, faces[0]) if faces else None)
+        if expression is None:
+            return
+        self.last_activity = time.monotonic()
+        if self._idle() and not self.play(REACTIONS[expression]):
+            did = REACTIONS[expression]
+        else:   # walking, or a gesture already playing: the sound only
+            self.voice.say(SOUNDS[expression])
+            did = SOUNDS[expression] + " sound"
+        self.reaction = (expression, did, time.time())
+
+    def set_follow(self, on):
+        """Follow the nearest person the camera sees, steering the running walking policy (robot/follow.py)."""
+        w = self.robot.walker
+        if not on:
+            if self.follower:
+                self.follower.stop()
+            self.follower = None
+            if w.steer_owner == "follow":
+                w.set_command(0.0, 0.0, 0.0, source="follow")
+                w.steer_owner = None
+            return None
+        if self.follower and self.follower.running:
+            return None
+        if not w.running or w.phase != "walk":
+            return "start the walking policy first"
+        if w.steer_owner:
+            return f"{w.steer_owner} is steering: stop it first"
+        try:
+            from robot.faces import jpeg_frames
+            from robot.follow import Follower
+            w.steer_owner = "follow"
+            w.set_command(0.0, 0.0, 0.0, source="follow")
+            self.follower = Follower(w, lambda: jpeg_frames(self.robot.camera.stream()))
+            self.follow_error = None
+        except Exception as e:  # no OpenCV, no model
+            w.steer_owner = None
+            self.follower, self.follow_error = None, str(e)[:200]
+        self.last_activity = time.monotonic()
+        return self.follow_error
 
     def set_listening(self, on):
         """Voice commands through a microphone (robot/voice_commands.py)."""
@@ -240,6 +312,8 @@ class Personality:
             return "start the walking policy first"
         if self.spinning:
             return "already spinning"
+        if w.steer_owner:
+            return f"{w.steer_owner} is steering: stop it first"
         self.spinning = True
         w.steer_owner = "spin"
         threading.Thread(target=self._spin, daemon=True).start()
@@ -267,9 +341,14 @@ class Personality:
             w.steer_owner = None
 
     def state(self):
+        follower = self.follower if self.follower and self.follower.running else None
         return {"gesture": self.gesture, "playful": self.playful, "voice": self.voice.state(),
-                "greet_faces": self.faces is not None, "faces": self.faces.state() if self.faces else None,
-                "faces_error": self.faces_error, "listening": self.listener is not None,
+                "greet_faces": self.greeting, "faces": self.faces.state() if self.faces else None,
+                "faces_error": self.faces_error, "emotions": self.reading,
+                "expression": self.mood.shown if self.mood and self.reading else None,
+                "reaction": list(self.reaction) if self.reaction else None,
+                "following": follower is not None, "follow": follower.state() if follower else None,
+                "follow_error": self.follow_error or (self.follower.error if self.follower else None), "listening": self.listener is not None,
                 "listener_error": self.listener_error or (self.listener.error if self.listener else None),
                 "spinning": self.spinning,
                 "gestures": [{"name": k, "label": v[0], "description": v[1]} for k, v in G.GESTURES.items()]}

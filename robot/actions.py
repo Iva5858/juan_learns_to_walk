@@ -196,6 +196,18 @@ def faces(robot, on):
     return robot.personality.set_faces(on)
 
 
+@action("emotions", "React to expressions", "personality", on=bool)
+def emotions(robot, on):
+    """Happy -> happy bounce, sad -> sad, surprised -> excited (robot/emotions.py)."""
+    return robot.personality.set_emotions(on)
+
+
+@action("follow", "Follow a person", "drive", on=bool)
+def follow(robot, on):
+    """Steer the running walking policy toward the nearest person the camera sees (robot/follow.py)."""
+    return robot.personality.set_follow(on)
+
+
 @action("listen", "Voice commands", "voice", on=bool)
 def listen(robot, on):
     """Listen for "Juan, ..." through the microphone."""

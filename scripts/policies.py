@@ -1,5 +1,5 @@
 """Which exported policy plays which role on the robot: robot/policies/roles.json. The dashboard offers only these
-(walk, preselected, and speed as walking policies; getup for Get up), and deploy_pi.sh copies only these to the Pi.
+(walk, preselected, speed and follow as walking policies; getup for Get up), and deploy_pi.sh copies only these to the Pi.
 Every other export stays in robot/policies/ on this computer, the library, ready to be given a role again.
 
     python scripts/policies.py                                   # the roles
@@ -14,7 +14,7 @@ from pathlib import Path
 
 POLICIES = Path(__file__).resolve().parents[1] / "robot" / "policies"
 ROLES = POLICIES / "roles.json"
-NAMES = ("walk", "speed", "getup")
+NAMES = ("walk", "speed", "follow", "getup")
 
 
 def path(role, name):

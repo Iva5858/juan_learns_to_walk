@@ -1,9 +1,9 @@
-// Actions: gestures, dance, the victory spin, playful mode, greeting faces, voice, sounds, speech. Any action
+// Actions: gestures, dance, the victory spin, playful mode, greeting faces, expressions, following, voice, sounds, speech. Any action
 // declared in robot/actions.py (groups poses / personality / voice) that takes no required parameter and
 // isn't one of these gets its own button under "More" by itself: a new behavior needs no page change.
 import {$, R, call, esc, onState} from './core.js';
 
-const SHOWN = new Set(['gesture', 'gesture/stop', 'playful', 'faces', 'listen', 'voice', 'sound', 'say', 'volume', 'spin',
+const SHOWN = new Set(['gesture', 'gesture/stop', 'playful', 'faces', 'emotions', 'follow', 'listen', 'voice', 'sound', 'say', 'volume', 'spin',
                        'boot', 'pose']);
 let built = false;
 
@@ -20,6 +20,8 @@ export function build(root) {
     <div class="card"><h3>Modes</h3>
       <div class="row"><button id="aPlayful">Playful mode</button><span class="sub">idle moves and chirps every 10–25 s at Home</span></div>
       <div class="row"><button id="aFaces">Greet faces</button><span class="sub">a bounce when someone appears</span></div>
+      <div class="row"><button id="aEmo">React to expressions</button><span class="sub">happy → bounce, sad → sad, surprised → excited; faces at the robot's height</span></div>
+      <div class="row"><button id="aFollow">Follow a person</button><span class="sub">while the walking policy runs: walks to ~1.3 m of the nearest person</span></div>
       <div class="row"><button id="aListen">Voice commands</button><span class="sub">"Juan, walk" / "stop" / "dance"; steers a running policy</span></div>
       <div class="sub" id="aModeNote"></div></div>
     <div class="card"><h3>Voice</h3>
@@ -38,6 +40,8 @@ export function build(root) {
   $('aSpin').onclick = () => call('spin');
   $('aPlayful').onclick = () => call('playful', {on: !R.S.personality.playful});
   $('aFaces').onclick = () => call('faces', {on: !R.S.personality.greet_faces});
+  $('aEmo').onclick = () => call('emotions', {on: !R.S.personality.emotions});
+  $('aFollow').onclick = () => call('follow', {on: !R.S.personality.following});
   $('aListen').onclick = () => call('listen', {on: !R.S.personality.listening});
   $('aEmotions').onclick = e => { if (e.target.dataset.e) call('sound', {emotion: e.target.dataset.e}); };
   $('aFiles').onclick = e => { if (e.target.dataset.f) call('sound', {file: e.target.dataset.f}); };
@@ -72,9 +76,17 @@ onState((S, full) => {
   $('aSpin').disabled = !S.walker.running || P.spinning;
   toggle('aPlayful', 'Playful mode', P.playful);
   toggle('aFaces', 'Greet faces', P.greet_faces);
+  toggle('aEmo', 'React to expressions', P.emotions);
+  toggle('aFollow', 'Follow a person', P.following);
+  $('aFollow').disabled = !P.following && !S.walker.running;
+  const F = P.follow, rx = P.reaction;
   toggle('aListen', 'Voice commands', P.listening);
-  const notes = [P.faces_error && 'camera/faces: ' + P.faces_error, P.listener_error && 'voice: ' + P.listener_error,
-                 P.faces && P.faces.faces ? `sees ${P.faces.faces} face(s)` : '', P.spinning ? 'spinning' : ''].filter(Boolean);
+  const notes = [P.faces_error && 'camera/faces: ' + P.faces_error, P.follow_error && 'follow: ' + P.follow_error,
+                 P.listener_error && 'voice: ' + P.listener_error,
+                 P.faces && P.faces.faces ? `sees ${P.faces.faces} face(s)` : '', P.expression ? 'expression: ' + P.expression : '',
+                 rx && Date.now() / 1000 - rx[2] < 10 ? `${rx[0]} → ${rx[1]}` : '',
+                 F ? `follow: ${F.state}` + (F.bearing_deg !== null ? ` ${F.bearing_deg}°` : '') + (F.distance_m !== null ? ` ${F.distance_m} m` : '') : '',
+                 P.spinning ? 'spinning' : ''].filter(Boolean);
   $('aModeNote').innerHTML = notes.map(esc).join(' · ');
   $('aVoiceNote').innerHTML = !V.backend ? '<span class="bad">no audio output found</span>'
     : V.error ? `<span class="warn">${esc(V.error)}</span>` : V.playing ? 'playing ' + esc(V.playing) : esc(V.backend + (V.tts ? ' + ' + V.tts : ''));

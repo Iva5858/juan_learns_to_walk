@@ -77,7 +77,7 @@ onState((S, full) => {
     <div>Memory<b>${p.mem_used_mb ? (p.mem_used_mb / 1024).toFixed(1) : '?'} GB</b>of ${p.mem_total_mb ? (p.mem_total_mb / 1024).toFixed(1) : '?'} GB</div>
     <div>CPU clock<b>${p.arm_mhz ? p.arm_mhz.toFixed(0) : '?'} MHz</b></div>
     <div>GPU clock<b>${p.gpu_mhz ? p.gpu_mhz.toFixed(0) : '?'} MHz</b></div>
-    <div style="grid-column:1/-1">Addresses (ssh iva585@…)<b style="font-size:13px;word-break:break-all">${(p.addresses || []).map(esc).join(' · ') || '?'}</b></div>
+    <div style="grid-column:1/-1">Addresses (ssh &lt;user&gt;@…)<b style="font-size:13px;word-break:break-all">${(p.addresses || []).map(esc).join(' · ') || '?'}</b></div>
     <div>Wi-Fi<b class="${!has(p.wifi_dbm) ? '' : p.wifi_dbm < -75 ? 'bad' : p.wifi_dbm < -65 ? 'warn' : ''}">${has(p.wifi_dbm) ? p.wifi_dbm.toFixed(0) + ' dBm' : '?'}</b></div>`;
   $('sCores').innerHTML = (p.cores || []).map((c, i) => `<div title="core ${i}: ${c.toFixed(0)}%"><i style="height:${Math.max(2, c).toFixed(0)}%"></i></div>`).join('');
   $('sBuses').innerHTML = S.buses.map(bus => {
@@ -91,6 +91,8 @@ onState((S, full) => {
   $('sExtras').innerHTML = `
     <div>Audio<b>${V.backend ? esc(V.backend) + (V.tts ? ' + ' + esc(V.tts) : '') : '<span class="bad">none</span>'}</b>${V.error ? `<span class="warn">${esc(V.error)}</span>` : ''}</div>
     <div>Faces<b>${P.greet_faces ? 'on' : 'off'}</b>${P.faces_error ? `<span class="warn">${esc(P.faces_error)}</span>` : P.faces && P.faces.faces ? 'sees ' + P.faces.faces : ''}</div>
+    <div>Expressions<b>${P.emotions ? 'on' : 'off'}</b>${P.expression ? esc(P.expression) : ''}</div>
+    <div>Following<b>${P.following ? esc(P.follow.state) : 'off'}</b>${P.follow_error ? `<span class="warn">${esc(P.follow_error)}</span>` : ''}</div>
     <div>Voice commands<b>${P.listening ? 'on' : 'off'}</b>${P.listener_error ? `<span class="warn">${esc(P.listener_error)}</span>` : ''}</div>
     <div>Camera<b>${S.camera.available ? 'available' : 'no'}</b>${S.camera.error ? esc(S.camera.error) : ''}</div>
     <div>Stabilization<b>${S.camera.stabilization_configured ? 'configured' : 'off'}</b>${S.camera.stabilization_error ? esc(S.camera.stabilization_error) : ''}</div>`;

@@ -28,7 +28,7 @@ Forward speed (−0.15 m/s up to a speed curriculum's top), sideways speed (±0.
 Speed is measured along the target heading (the start heading, turned only as commanded), so walking in circles earns nothing. A landing above 3× body weight, or a joint forced past 1.3× servo speed while the servo pushes back hard, ends the episode like a fall ("broke").
 
 ## Randomized every episode
-Servo strength and speed (one battery-voltage draw, ±5% per servo), stiffness and damping ±30%, 0–1° gear slack, ±1.7° zero error; 25–59 ms of action delay and sensor readings up to a step old; 1.65–2.25 kg with extra torso mass, CoM shift; IMU tilt bias ±2.5°, gyro bias, servo buzz on the gyro; floor friction 0.5–1.2 and slopes up to 3°; a perturbed, already-moving start; and shoves.
+Servo strength and speed (one battery-voltage draw, ±5% per servo), stiffness and damping ±30%, 0–1° gear slack, ±1.7° zero error; 25–59 ms of action delay and sensor readings up to a step old; 1.65–2.25 kg with extra torso mass, CoM shift; IMU tilt bias ±2.5°, gyro bias, servo buzz on the gyro; floor friction 0.35–0.8 and slopes up to 3°; a perturbed, already-moving start; and shoves.
 
 ## Training stages
 Each stage is its own run that resumes the previous one (`--stage` and `--resume`); curriculum levels carry over in `curriculum.json`.
@@ -100,6 +100,7 @@ Walking clips land in `runs/<generation>/<name>/videos/` (layout: [runs.md](runs
 | `scripts/play.py --run R [--test]` | drive it with the keyboard after the robot's boot sequence; `--test` checks it without a window |
 | `scripts/analysis/walk_test.py R ...` | the robot's way of walking (stand at home, take over, walk 8 s) at 0.1–0.6 m/s, calm and with shoves: speed reached, falls and hardware-limit stops, drift, weave, cadence, step length, foot lift, standing tilt and crouch; `--verdict` judges runs against the first; `--moves`: backward, sideways, turning |
 | `scripts/analysis/stand_pushes.py R ...` | commanded to stand: shoves from 8 directions at growing strength |
+| `scripts/analysis/follow_test.py R ...` | following a virtual person (robot/follow.py's controller, the camera's field of view, misses, noise and delay) for 40 s: falls, share of the time in view, distance, longest time out of view |
 | `scripts/analysis/standing.py NAME` | an exported policy through the robot's own controller: standing lean, offset from home, the jump at take-over |
 | `scripts/analysis/replay.py LOG` | a robot log replayed through the simulator: which servo model matches the real joints |
 | `scripts/analysis/replay_video.py LOG` | a robot log rendered in 3D with its telemetry |

@@ -1,6 +1,7 @@
 """The dashboard's API on the fake robot (robot/fake.py): actions, the walking policy, command sources,
 calibration in its own file, the old GET routes, and the event stream."""
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -10,6 +11,7 @@ import pytest
 
 from robot import dashboard, fake
 from robot.body import Robot
+from robot.follow import MODEL as follow_model
 from robot.joints import NAMES
 
 POLICY = "juan_v7_13_straight"   # committed (CI has it)
@@ -75,6 +77,28 @@ def test_walking_with_command_sources(server):
         assert json.load(r) == {"error": None}
     time.sleep(0.2)
     assert get(base, "/api/state")["mode"] == "idle"
+
+
+@pytest.mark.skipif(not os.path.exists(follow_model), reason="person model not downloaded")
+def test_following_takes_the_steering_until_turned_off(server):
+    pytest.importorskip("cv2")
+    base, robot = server
+    assert call(base, "follow", on=True)[1]["error"] == "start the walking policy first"
+    assert call(base, "pose", name="home", ms=200)[0] == 200
+    time.sleep(0.5)
+    assert call(base, "policy/start", name=POLICY) == (200, {"error": None})
+    assert call(base, "follow", on=True) == (200, {"error": None})
+    assert robot.walker.steer_owner == "follow"
+    assert call(base, "policy/cmd", vx=0.2)[0] == 409             # the page doesn't steer meanwhile
+    assert call(base, "spin")[1]["error"] == "follow is steering: stop it first"
+    time.sleep(1.0)                                                # the fake camera: nobody to follow
+    P = get(base, "/api/state")["personality"]
+    assert P["following"] and P["follow"]["state"] == "looking" and P["follow"]["command"] == [0.0, 0.0]
+    assert call(base, "follow", on=False) == (200, {"error": None})
+    assert robot.walker.steer_owner is None and call(base, "policy/cmd", vx=0.1)[0] == 200
+    with urllib.request.urlopen(base + "/policy/stop") as r:
+        assert json.load(r) == {"error": None}
+    time.sleep(0.2)
 
 
 def test_calibration_stays_in_the_fake_robots_file(server):

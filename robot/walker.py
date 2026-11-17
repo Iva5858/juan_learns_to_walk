@@ -45,11 +45,11 @@ PI_FIELDS = ("cpu", "self_cpu", "load", "mem_used_mb", "arm_mhz", "gpu_mhz", "te
              "throttled", "bus_ms", "imu_failures")
 
 
-WALK_ROLES = ("walk", "speed")   # the walking policies' roles, in the page's order; plus "getup"
+WALK_ROLES = ("walk", "speed", "follow")   # the walking policies' roles, in the page's order; plus "getup"
 
 
 def roles():
-    """robot/policies/roles.json: the one policy per role the page offers ({"walk": name, "speed": name or null,
+    """robot/policies/roles.json: the one policy per role the page offers ({"walk": name, "speed" and "follow": name or null,
     "getup": name}; scripts/policies.py sets it). Every other exported policy stays in the folder, unlisted (the
     library). None if there is no roles file: then every policy is listed, as before."""
     try:
@@ -118,18 +118,23 @@ class Walker:
     def heartbeat(self):
         self.last_link = time.monotonic()
 
-    def set_command(self, vx, vy, wz, source="page"):
+    def set_command(self, vx, vy, wz, source="page", alive=True):
+        """alive=False: a command that is not a sign of the page being there (a behavior on its own, e.g.
+        following a person): it doesn't hold off the lost-connection stop and is refused once the link is quiet."""
         if self.ctrl is None:
             return "policy not running"
         if self.phase in ("getup", "hold"):
             return "getting up: commands once it is up"
         if self.steer_owner and source != self.steer_owner:
             return f"{self.steer_owner} is steering: stop it first"
+        if not alive and time.monotonic() - self.last_link > LINK_STAND_S:
+            return "no page connected: standing still"
         self.command_source = source
         m = self.ctrl.policy.meta
         clip = lambda v, r: float(min(max(v, float(r[0])), float(r[1])))
         self.ctrl.set_command(clip(vx, m["forward_range"]), clip(vy, m["lateral_range"]), clip(wz, m["yaw_rate_range"]))
-        self.heartbeat()
+        if alive:
+            self.heartbeat()
         return None
 
     def start(self, name):
@@ -284,12 +289,13 @@ class Walker:
         return [np.nan if pi.get(k) is None else float(pi[k]) for k in PI_FIELDS]
 
     def _vision(self):
-        """(camera streamed in the last 2 s, face detection on): what else was using the Pi."""
+        """(camera streamed in the last 2 s, face or person detection on): what else was using the Pi."""
         r = self.robot
         cam = getattr(r, "camera", None)
         seen = getattr(cam, "last_view", 0.0)
+        p = getattr(r, "personality", None)
         return [float(bool(seen) and time.monotonic() - seen < 2.0),
-                float(getattr(getattr(r, "personality", None), "faces", None) is not None)]
+                float(getattr(p, "faces", None) is not None or getattr(p, "follower", None) is not None)]
 
     def _send(self, targets_rad):
         r, per_bus = self.robot, {}
