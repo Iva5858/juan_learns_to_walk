@@ -1,13 +1,13 @@
 // Drive: start a policy, then steer it. Every input sets the same command (forward m/s, sideways m/s, turn
 // rad/s), sent 10 times a second while it changes and every 0.25 s otherwise:
 //   * forward speed is a set speed (cruise): number keys 0-6 (0.1 m/s each; Shift+1/2 backward), the preset
-//     buttons or the slider set it; holding up / down ramps it; the joystick drives it directly while held;
+//     buttons or the slider set it; each press of up / down changes it by STEP; the joystick drives it directly while held;
 //   * turning and side-stepping last while held (keys, buttons, the joystick's sideways axis, a gamepad).
 // The robot caps the command to what the policy was trained for; the page shows both.
 import {$, R, battery, call, esc, has, n1, onState} from './core.js';
 import {DETAILS, View3D} from './view3d.js';
 
-const RAMP = 0.2;                 // m/s per second while up / down is held
+const STEP = 0.05;                // m/s per press of up / down
 const DECEL = 0.5;                // m/s per second at most when slowing down or stopping: the robot logs of
                                   // 2026-11-03 fell 5 times within 0.8 s of an instant stop from 0.4-0.6 m/s
 const PRESETS = [-0.15, -0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
@@ -16,7 +16,7 @@ const DEAD = 0.15;                // gamepad stick dead zone
 
 const st = {
   cruise: 0,                      // set forward speed
-  hold: {turnL: 0, turnR: 0, sideL: 0, sideR: 0, up: 0, down: 0},
+  hold: {turnL: 0, turnR: 0, sideL: 0, sideR: 0},
   stick: null,                    // {x, y} in -1..1 while the on-screen joystick is held
   pad: null,                      // the same from a gamepad
   turnRate: 0.4, sideSpeed: 0.1, stickHold: false,
@@ -133,7 +133,7 @@ export function build(root) {
         Slowing down and stopping (<kbd>Space</kbd>, lower speeds) ease off at 0.5 m/s per second: stopping
         dead from a fast walk tipped the robot over. <kbd>Esc</kbd> stops the policy at once.
         Keys: <kbd>0</kbd>–<kbd>6</kbd> forward speed (0.1 m/s each), <kbd>Shift</kbd>+<kbd>1</kbd>/<kbd>2</kbd> backward;
-        <kbd>↑</kbd><kbd>↓</kbd> held: faster / slower; <kbd>←</kbd><kbd>→</kbd> held: turn; <kbd>,</kbd><kbd>.</kbd> held: sideways;
+        <kbd>↑</kbd><kbd>↓</kbd> each press: ±0.05 m/s; <kbd>←</kbd><kbd>→</kbd> held: turn; <kbd>,</kbd><kbd>.</kbd> held: sideways;
         <kbd>Space</kbd> stand still; <kbd>Esc</kbd> stop; <kbd>P</kbd> pick up. Gamepad: left stick drives, right stick
         sideways, A stand still, B stop.
         It stands still by itself if this page goes quiet for 2 s and stops after 6 s (keep it in front, screen on);
@@ -222,12 +222,17 @@ function joystick(el, knob) {
   for (const ev of ['pointerup', 'pointercancel']) el.addEventListener(ev, release);
 }
 
-const KEYS = {ArrowLeft: 'turnL', ArrowRight: 'turnR', Comma: 'sideL', Period: 'sideR', ArrowUp: 'up', ArrowDown: 'down'};
+const KEYS = {ArrowLeft: 'turnL', ArrowRight: 'turnR', Comma: 'sideL', Period: 'sideR'};
 function typing(e) { return ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) && e.target.type !== 'range' && e.target.type !== 'checkbox'; }
 function keydown(e) {
   if (typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
   const hold = KEYS[e.code] || KEYS[e.key];
   if (hold) { e.preventDefault(); st.hold[hold] = 1; return; }
+  if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {   // one step per press, on a 0.05 grid
+    e.preventDefault();
+    if (!e.repeat) setCruise(Math.round((st.cruise + (e.code === 'ArrowUp' ? STEP : -STEP)) / STEP) * STEP);
+    return;
+  }
   const digit = /^Digit([0-6])$/.exec(e.code);
   if (digit && !e.repeat) {
     e.preventDefault();
@@ -260,7 +265,6 @@ function gamepad() {
 function command(dt) {
   const r = ranges();
   const h = st.hold;
-  if (h.up || h.down) setCruise(st.cruise + (h.up - h.down) * RAMP * dt);
   let vx = st.cruise, vy = (h.sideL - h.sideR) * st.sideSpeed, wz = (h.turnL - h.turnR) * st.turnRate;
   const drive = st.stick || (st.pad && (st.pad.x || st.pad.y) ? st.pad : null);
   if (drive) {
