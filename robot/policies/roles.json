@@ -1,5 +1,6 @@
 {
- "walk": "juan_v7_31_takeover36_best",
- "speed": null,
+ "walk": "juan_v7_29_floors",
+ "speed": "juan_v7_41_steady",
+ "follow": "juan_v7_42_quick_best",
  "getup": "juan_getup_36_rand"
 }
