@@ -134,6 +134,16 @@ def test_pages_are_served_and_nothing_else(server):
             urllib.request.urlopen(base + path)
 
 
+def test_mic_test_waits_for_voice_commands(server):
+    base, robot = server
+    robot.personality.listener = object()      # voice commands holding the microphone
+    try:
+        assert call(base, "mic_test")[1]["error"].startswith("voice commands are using the microphone")
+    finally:
+        robot.personality.listener = None
+    assert "mic" in get(base, "/api/state")["personality"]
+
+
 def test_shutdown_saves_the_walk_log_and_stops_the_server(tmp_path, monkeypatch):
     from robot import body
     monkeypatch.setattr(body, "SHUTDOWN_MS", (50, 100, 20))
@@ -234,3 +244,4 @@ def test_shutdown_relaxes_at_once_when_fallen_or_failing(tmp_path, monkeypatch):
     with pytest.raises(ZeroDivisionError):
         robot.shutdown()
     assert not any(s["torque"] for s in robot.hw.world.servos.values())   # relaxed all the same
+

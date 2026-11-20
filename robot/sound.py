@@ -195,6 +195,13 @@ class Voice:
     def speak(self, text):
         self._put(("tts", text[:200]))
 
+    def play_samples(self, samples, rate=RATE):
+        """Play float samples (-1..1, mono, at `rate` Hz), e.g. a microphone recording (robot/mic.py)."""
+        samples = np.asarray(samples, dtype=np.float64)
+        if rate != RATE and len(samples) > 1:
+            samples = np.interp(np.arange(0, len(samples) * RATE / rate) * rate / RATE, np.arange(len(samples)), samples)
+        self._put(("samples", samples))
+
     def speak_chords(self, text, translate=False):
         """Say `text` in chord speech; with translate, a robot voice speaks the words afterwards."""
         self._put(("chords", text[:200]))
@@ -227,7 +234,7 @@ class Voice:
     def _loop(self):
         while True:
             kind, what = self._q.get()
-            self.playing = what
+            self.playing = what if isinstance(what, str) else "recording"
             try:
                 if kind == "emotion":
                     vol = self.volume if self.backend == "aplay" else 1.0  # afplay sets its own volume
@@ -238,6 +245,8 @@ class Voice:
                 elif kind == "chords":
                     vol = self.volume if self.backend == "aplay" else 1.0
                     self._play_wav_bytes(to_wav(make_chords(what), vol))
+                elif kind == "samples":
+                    self._play_wav_bytes(to_wav(what, self.volume if self.backend == "aplay" else 1.0))
                 elif kind == "tts":
                     if self.tts is None:
                         raise OSError("no text-to-speech: sudo apt install espeak-ng")

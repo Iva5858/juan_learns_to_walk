@@ -214,6 +214,14 @@ def listen(robot, on):
     return robot.personality.set_listening(on)
 
 
+@action("mic_test", "Test microphone", "voice", seconds=(float, 3.0), play_back=(bool, True))
+def mic_test(robot, seconds, play_back):
+    """Record a few seconds (1-10), measure the level, then play the recording back on the speaker (robot/mic.py)."""
+    if robot.personality.listener is not None:
+        return "voice commands are using the microphone: turn them off first"
+    return robot.personality.mic.start(seconds, play_back)
+
+
 @action("voice", "Voice phrase", "voice", text=str)
 def voice(robot, text):
     """A phrase heard by a microphone elsewhere (python -m robot.voice_commands --robot)."""

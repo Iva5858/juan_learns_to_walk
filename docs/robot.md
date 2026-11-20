@@ -22,6 +22,8 @@ The camera (Actions tab; OpenCV and three OpenCV-zoo models in `robot/models/`, 
 - **Follow a person** ([follow.py](../robot/follow.py), NanoDet-Plus, people only): steers the running walking policy like the joystick: turns toward the nearest person, walks to ~1.3 m of them (distance from where their feet meet the floor), at most 0.2 m/s and 0.5 rad/s, standing still when they are lost and then turning toward where they were last seen for 6 s. It takes the steering (the joystick, voice and the victory spin wait) and doesn't count as the page being there: with the page gone the walker stands and stops as usual. Use a policy that turns in place, the `follow` role (`python scripts/policies.py follow <name>`); `scripts/analysis/follow_test.py` compares policies on it in the simulator.
 Each runs on a computer's webcam too: `python -m robot.faces`, `python -m robot.emotions`, `python -m robot.follow`.
 
+**Test microphone** (Actions tab, Voice card; [mic.py](../robot/mic.py)): records 3 s from the default input (sounddevice, as the voice commands listen, or `arecord`), shows the level and peak in dB and a verdict (ok / silent / very quiet / clipping) with the input's name, then plays the recording back on the speaker, raised up to +30 dB so it can be heard. One press checks both. It waits while voice commands hold the microphone.
+
 Servo and calibration tools, run on the Pi with the dashboard stopped:
 - [center_servos.py](../robot/center_servos.py): leg servos to the middle of their range (500 counts), one at a time, each held while its horn goes back on straight (re-zeroing the legs).
 - [carry_limits.py](../robot/carry_limits.py): carry a calibration's joint limits and directions over to a new zero, after re-horning the servos.

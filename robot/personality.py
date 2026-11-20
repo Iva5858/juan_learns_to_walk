@@ -22,6 +22,7 @@ import time
 
 from robot import gestures as G
 from robot.joints import BY_NAME, HOME, NAMES
+from robot.mic import MicTest
 from robot.sound import Voice
 
 IDLE_EVERY_S = (10.0, 25.0)
@@ -39,6 +40,7 @@ class Personality:
     def __init__(self, robot):
         self.robot = robot
         self.voice = Voice()
+        self.mic = MicTest(self.voice)
         self.gesture, self._cancel = None, threading.Event()
         self.playful = False
         self.last_activity = time.monotonic()
@@ -342,7 +344,7 @@ class Personality:
 
     def state(self):
         follower = self.follower if self.follower and self.follower.running else None
-        return {"gesture": self.gesture, "playful": self.playful, "voice": self.voice.state(),
+        return {"gesture": self.gesture, "playful": self.playful, "voice": self.voice.state(), "mic": self.mic.state(),
                 "greet_faces": self.greeting, "faces": self.faces.state() if self.faces else None,
                 "faces_error": self.faces_error, "emotions": self.reading,
                 "expression": self.mood.shown if self.mood and self.reading else None,

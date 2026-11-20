@@ -3,7 +3,7 @@
 // isn't one of these gets its own button under "More" by itself: a new behavior needs no page change.
 import {$, R, call, esc, onState} from './core.js';
 
-const SHOWN = new Set(['gesture', 'gesture/stop', 'playful', 'faces', 'emotions', 'follow', 'listen', 'voice', 'sound', 'say', 'volume', 'spin',
+const SHOWN = new Set(['gesture', 'gesture/stop', 'playful', 'faces', 'emotions', 'follow', 'listen', 'voice', 'mic_test', 'sound', 'say', 'volume', 'spin',
                        'boot', 'pose']);
 let built = false;
 
@@ -28,6 +28,8 @@ export function build(root) {
       <div class="row" id="aEmotions"></div><div class="row" id="aFiles"></div>
       <div class="row"><input id="aSay" type="text" placeholder="Say something (needs espeak-ng)" style="flex:1;min-width:0">
         <button class="small" id="aSayBtn">Say</button></div>
+      <div class="row"><button class="small" id="aMic" title="Record 3 s, show the level, play it back on the speaker">Test microphone</button>
+        <span class="sub" id="aMicNote">records 3 s (talk), then plays it back</span></div>
       <div class="row"><label class="sub">Volume <input id="aVol" type="range" min="0" max="1" step="0.05"></label>
         <span class="sub" id="aVoiceNote"></span></div></div>
     <div class="card" id="aMoreCard" hidden><h3>More</h3><div class="row" id="aMore"></div></div>
@@ -48,6 +50,7 @@ export function build(root) {
   const say = () => { const t = $('aSay').value.trim(); if (t) call('say', {text: t}); };
   $('aSayBtn').onclick = say;
   $('aSay').onkeydown = e => { if (e.key === 'Enter') say(); };
+  $('aMic').onclick = () => call('mic_test', {seconds: 3});
   $('aVol').onchange = e => call('volume', {v: +e.target.value});
   $('aMore').onclick = e => { if (e.target.dataset.a) call(e.target.dataset.a); };
 }
@@ -88,6 +91,16 @@ onState((S, full) => {
                  F ? `follow: ${F.state}` + (F.bearing_deg !== null ? ` ${F.bearing_deg}°` : '') + (F.distance_m !== null ? ` ${F.distance_m} m` : '') : '',
                  P.spinning ? 'spinning' : ''].filter(Boolean);
   $('aModeNote').innerHTML = notes.map(esc).join(' · ');
+  const M = P.mic, MR = M && M.result;
+  if (M) {
+    $('aMic').disabled = M.running || P.listening;
+    $('aMicNote').innerHTML = M.running ? `recording… talk now${M.live_db !== null ? ` · level ${M.live_db} dB` : ''}`
+      : P.listening ? 'voice commands are using the mic: turn them off to test it'
+      : MR ? (MR.verdict === 'ok' ? '<span class="ok">ok</span>' : `<span class="${M.phase === 'error' ? 'bad' : 'warn'}">${esc(MR.verdict)}</span>`)
+        + (MR.rms_db !== undefined ? ` · level ${MR.rms_db} dB, peak ${MR.peak_db} dB` + (MR.clipped ? `, ${(MR.clipped * 100).toFixed(1)}% clipped` : '')
+           + ` · ${esc(MR.device)}` + (MR.played_back ? ` · played back (+${MR.playback_gain_db} dB)` : '') : '')
+      : 'records 3 s (talk), then plays it back';
+  }
   $('aVoiceNote').innerHTML = !V.backend ? '<span class="bad">no audio output found</span>'
     : V.error ? `<span class="warn">${esc(V.error)}</span>` : V.playing ? 'playing ' + esc(V.playing) : esc(V.backend + (V.tts ? ' + ' + V.tts : ''));
 });
